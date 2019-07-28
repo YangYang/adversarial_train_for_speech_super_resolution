@@ -1,23 +1,25 @@
+import math
 import os
 
 cur_path = os.path.abspath(os.path.dirname(__file__))
 PROJECT_NAME = os.path.split(cur_path)[1]
 
-# train：tr validation：cv test：tt
+# c_train：tr validation：cv test：tt
 # TYPE = 'tr'
-# train
+# c_train
 EPOCH = 1000
 TRAIN_BATCH_SIZE = 64
-# TRAIN_DATA_PATH = '/home/yangyang/userspace/data/TIMIT_low_pass/8k/tmp/train.bin'
-# TRAIN_DATA_LABEL_PATH = '/home/yangyang/userspace/data/TIMIT_low_pass/8k/tmp/train_label.bin'
 TRAIN_DATA_PATH = '/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x/tmp/train.wav'
-TRAIN_DATA_LABEL_PATH = '/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x/tmp/train_label.wav'
+TRAIN_LABEL_PATH = '/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x/tmp/train_label.wav'
+TRAIN_PARAM_PATH = '/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x/tmp/train_param.mat'
+LOG_TRAIN_PARAM_PATH = '/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x/tmp/log_train_param.mat'
+TRAIN_LABEL_PARAM_PATH = '/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x/tmp/train_label_param.mat'
+LOG_TRAIN_LABEL_PARAM_PATH = '/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x/tmp/log_train_label_param.mat'
 TRAIN_DATA_NUM = 4620
 
 # validation
 VALIDATION_BATCH_SIZE = 1
-VALIDATION_DATA_PATH = '/home/yangyang/userspace/data/envaluation_1/'
-VALIDATION_DATA_PATH_NEW = '/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x/test/'
+VALIDATION_DATA_PATH = '/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x/test/'
 VALIDATION_DATA_LABEL_PATH = '/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x/test_label/'
 VALIDATION_DATA_NUM = 100
 
@@ -58,16 +60,18 @@ else:
     print('The validation result store path: {}'.format(RESULT_STORE))
 
 # tag
-PRE_TRAIN = True
 CUDA_ID = ['cuda:1']
-IS_LOG = True
 PRE_TRAIN_D = False
 PRE_TRAIN_G = False
 TRAIN = True
 IS_REVERT = False   # d_net的输入是否revert
+SAMPLING_RATE = 8000
+WINDOWS_TIME = 32 * 1e-3   # 32 ms
+HOP_TIME = 8 * 1e-3        # 8ms
 # other parameters
-FILTER_LENGTH = 160 # 窗长
-HOP_LENGTH = 80     # 帧移
+FILTER_LENGTH = int(SAMPLING_RATE * WINDOWS_TIME)    # window sample num
+HOP_LENGTH = int(SAMPLING_RATE * HOP_TIME)       # hop sample num
+FEATURE_NUM = int(FILTER_LENGTH // 2 + 1)        # feature number
 EPSILON = 1e-8
 NUM_WORKERS = 8
 LAMBDA_FOR_REC_LOSS = 0.5
@@ -78,4 +82,17 @@ else:
 D_STEP = 10
 PRINT_TIME = 200
 SAVE_TIME = 2000
-GAMMA = 2
+NEED_NORM = True
+IS_LOG = True
+
+# for this project
+# 2x : 65
+# 4x : 33
+G_INPUT_NUM = FEATURE_NUM // 2 + 1      # for 2x
+# G_INPUT_NUM = FEATURE_NUM // 4 + 1    # for 4x
+# 2x : 7
+# 4x : 4
+OVER_LAP = math.floor(G_INPUT_NUM / 10) + 1
+# 2x : 71
+# 4x : 100
+G_OUTPUT = FEATURE_NUM - (G_INPUT_NUM - OVER_LAP)
