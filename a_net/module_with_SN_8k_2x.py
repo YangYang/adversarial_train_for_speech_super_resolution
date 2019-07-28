@@ -92,7 +92,8 @@ class GeneratorNet(nn.Module):
         # return conv9_output.permute(0, 2, 1)
         # return F.softplus(conv9_output.permute(0, 2, 1))
         # return conv9_output.permute(0, 2, 1)
-        return torch.sigmoid(conv9_output.permute(0, 2, 1))
+        # return torch.sigmoid(conv9_output.permute(0, 2, 1))
+        return conv9_output.permute(0, 2, 1)
 
 
 class DiscriminatorNet(nn.Module):

@@ -109,15 +109,11 @@ class FeatureCreator(nn.Module):
         self.label_helper = LabelHelper().cuda(CUDA_ID[0])
         if NEED_NORM:
             if IS_LOG:
-                self.log_train_mean = torch.Tensor(loadmat(LOG_TRAIN_PARAM_PATH)['mean']).cuda(CUDA_ID[0])
-                self.log_train_var = torch.Tensor(loadmat(LOG_TRAIN_PARAM_PATH)['var']).cuda(CUDA_ID[0])
-                self.log_train_label_mean = torch.Tensor(loadmat(LOG_TRAIN_LABEL_PARAM_PATH)['mean']).cuda(CUDA_ID[0])
-                self.log_train_label_var = torch.Tensor(loadmat(LOG_TRAIN_LABEL_PARAM_PATH)['var']).cuda(CUDA_ID[0])
+                self.log_train_mean = torch.Tensor(np.load(TRAIN_PARAM_PATH + 'train_log_mean.npy', allow_pickle=True)).cuda(CUDA_ID[0])
+                self.log_train_var = torch.Tensor(np.load(TRAIN_PARAM_PATH + 'train_log_var.npy', allow_pickle=True)).cuda(CUDA_ID[0])
             else:
-                self.train_mean = torch.Tensor(loadmat(TRAIN_PARAM_PATH)['mean']).cuda(CUDA_ID[0])
-                self.train_var = torch.Tensor(loadmat(TRAIN_PARAM_PATH)['var']).cuda(CUDA_ID[0])
-                self.train_label_mean = torch.Tensor(loadmat(TRAIN_LABEL_PARAM_PATH)['mean']).cuda(CUDA_ID[0])
-                self.train_label_var = torch.Tensor(loadmat(TRAIN_LABEL_PARAM_PATH)['var']).cuda(CUDA_ID[0])
+                self.train_mean = torch.Tensor(np.load(TRAIN_PARAM_PATH + 'train_mean.npy', allow_pickle=True)).cuda(CUDA_ID[0])
+                self.train_var = torch.Tensor(np.load(TRAIN_PARAM_PATH + 'train_var.npy', allow_pickle=True)).cuda(CUDA_ID[0])
 
     def forward(self, batch_info):
         # label 63
@@ -136,10 +132,8 @@ class FeatureCreator(nn.Module):
             if IS_LOG:
                 # normalized
                 g_input = (g_input - self.log_train_mean) / (self.log_train_var + torch.Tensor(np.array(EPSILON)).cuda(CUDA_ID[0]))
-                g_label = (g_label - self.log_train_label_mean) / (self.log_train_label_var + torch.Tensor(np.array(EPSILON) ).cuda(CUDA_ID[0]))
             else:
                 # normalized
                 g_input = (g_input - self.train_mean) / (self.train_var + torch.Tensor(np.array(EPSILON)).cuda(CUDA_ID[0]))
-                g_label = (g_label - self.train_label_mean) / (self.train_label_var + torch.Tensor(np.array(EPSILON)).cuda(CUDA_ID[0]))
         # permute (N, C, L)
         return g_input, g_label

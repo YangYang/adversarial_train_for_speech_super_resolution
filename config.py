@@ -11,10 +11,7 @@ EPOCH = 1000
 TRAIN_BATCH_SIZE = 64
 TRAIN_DATA_PATH = '/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x/tmp/train.wav'
 TRAIN_LABEL_PATH = '/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x/tmp/train_label.wav'
-TRAIN_PARAM_PATH = '/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x/tmp/train_param.mat'
-LOG_TRAIN_PARAM_PATH = '/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x/tmp/log_train_param.mat'
-TRAIN_LABEL_PARAM_PATH = '/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x/tmp/train_label_param.mat'
-LOG_TRAIN_LABEL_PARAM_PATH = '/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x/tmp/log_train_label_param.mat'
+TRAIN_PARAM_PATH = '/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x/tmp/'
 TRAIN_DATA_NUM = 4620
 
 # validation

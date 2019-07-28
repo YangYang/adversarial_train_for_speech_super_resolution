@@ -39,11 +39,11 @@ def validation_pesq(net, feature_creator):
     loss_helper = LossHelper()
     if NEED_NORM:
         if IS_LOG:
-            label_mean = feature_creator.log_train_label_mean
-            label_var = feature_creator.log_train_label_var
+            train_mean = feature_creator.log_train_mean
+            train_var = feature_creator.log_train_var
         else:
-            label_mean = feature_creator.train_label_mean
-            label_var = feature_creator.train_label_var
+            train_mean = feature_creator.train_mean
+            train_var = feature_creator.train_var
     tag = 0
     for i in range(len(files)):
         if not files[i].endswith('_noise.wav') and files[i].endswith('.wav'):
@@ -108,12 +108,9 @@ def validation_pesq(net, feature_creator):
                 input_list = torch.log(input_list + torch.Tensor(np.array(EPSILON)).cuda(CUDA_ID[0]))
             # normalized
             if NEED_NORM:
-                input_list = (input_list - label_mean) / (label_var + torch.Tensor(np.array(EPSILON)).cuda(CUDA_ID[0]))
+                input_list = ((input_list.permute(0, 2, 1) - train_mean) / (train_var + torch.Tensor(np.array(EPSILON)).cuda(CUDA_ID[0]))).permute(0, 2, 1)
             # 送入网络
             est_speech = net(input_list[:, :65, :])
-            # revert
-            if NEED_NORM:
-                est_speech = est_speech * label_var + label_mean
             if IS_LOG:
                 est_speech = torch.exp(est_speech)
             # 恢复语音
@@ -195,7 +192,6 @@ def train(g_net, d_net, g_opt, d_opt, epoch, data_loader, loss_helper):
     sum_reconstruction_loss = 0
     sum_adversarial_loss = 0
     sum_disc_reg = 0
-    time = 0
     for i in range(epoch):
         # progressbar
         bar.start()
@@ -210,7 +206,7 @@ def train(g_net, d_net, g_opt, d_opt, epoch, data_loader, loss_helper):
             "1. train d_net"
             # 1.1 real
             d_opt.zero_grad()
-            # d_net输入的是语音
+            # d_net输入的是归一化后的g_input和g_label cat在一起的，即32 * (K + N)
             speech_real_input = torch.cat((g_input[:, :, :65], g_label[:, :, 58:]), 2)
             speech_real_input = speech_real_input.permute(0, 2, 1)
             speech_real_input = speech_real_input.unsqueeze(3)

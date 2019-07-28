@@ -22,23 +22,26 @@ import scipy.io as sio
 
 "create mean and var"
 "start"
-# sig, sr = sf.read(TRAIN_DATA_PATH)
-# stft = STFT(filter_length=FILTER_LENGTH, hop_length=HOP_LENGTH)
-# sig_mag = stft.spec_transform(stft.transform(torch.Tensor(sig[np.newaxis, ])))
+sig, sr = sf.read(TRAIN_DATA_PATH)
+stft = STFT(filter_length=FILTER_LENGTH, hop_length=HOP_LENGTH)
+sig_log_mag = stft.spec_transform(stft.transform(torch.Tensor(sig[np.newaxis, ])))
 # sig_log_mag = torch.log(sig_mag + EPSILON)
-# print(sig_log_mag.mean().item())
-# print(sig_log_mag.var().item())
-# sio.savemat('log_train_param.mat', {'mean': sig_log_mag.mean().item(), 'var': sig_log_mag.var().item()})
+mean = sig_log_mag.squeeze().mean(0)
+var = sig_log_mag.squeeze().var(0)
+np.save('train_mean', mean)
+np.save('train_var', var)
+# train_mean = np.load('train_mean.npy', allow_pickle=True)
+# train_var = np.load('train_var.npy', allow_pickle=True)
 "end"
 
 # train_param = sio.loadmat('train_param')
 # print(train_param)
 
-files = os.listdir(VALIDATION_DATA_PATH)
-files.sort()
-noise_list = []
-for item in files:
-    sig, sr = sf.read(VALIDATION_DATA_PATH + item)
-    noise = np.random.random(sig.size) * 1e-3
-    noise_list.append(noise)
-np.save('noise_4_TIMIT_new.npy', np.array(noise_list))
+# files = os.listdir(VALIDATION_DATA_PATH)
+# files.sort()
+# noise_list = []
+# for item in files:
+#     sig, sr = sf.read(VALIDATION_DATA_PATH + item)
+#     noise = np.random.random(sig.size) * 1e-3
+#     noise_list.append(noise)
+# np.save('noise_4_TIMIT_new.npy', np.array(noise_list))
