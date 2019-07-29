@@ -40,19 +40,25 @@ def validation_pesq(net, output_path):
         else:
             train_mean = feature_creator.train_mean
             train_var = feature_creator.train_var
-    tag = 0
     for i in range(len(files)):
         if not files[i].endswith('_noise.wav') and files[i].endswith('.wav'):
             bar.update(i)
             # input
             speech, sr = sf.read(VALIDATION_DATA_PATH + files[i])
-            sf.write(output_path + files[i], speech, sr)
             # 对齐
             nframe = (len(speech) - FILTER_LENGTH) // HOP_LENGTH + 1
             size = nframe % 32
             nframe = nframe - size
             sample_num = FILTER_LENGTH + (nframe - 1) * HOP_LENGTH
             speech = speech[:sample_num]
+            sf.write(output_path + files[i], speech, sr)
+            # tmp 为半波整流之后获取相位用
+            base = speech.copy()
+            tmp = speech.copy()
+            tmp_low = speech.copy()
+            sf.write('base_cat.wav', base, sr)
+            base_mag = stft.spec_transform(stft.transform(torch.Tensor(base[np.newaxis, :]))).squeeze()
+            base_mag = base_mag.permute(1, 0)
             # stft
             speech = torch.Tensor(speech).unsqueeze(0)
             speech_spec = stft.transform(speech)
@@ -63,23 +69,19 @@ def validation_pesq(net, output_path):
             # label，为了计算pesq
             clean, sr = sf.read(VALIDATION_DATA_LABEL_PATH + files[i])
             clean = clean[:sample_num]
-            noise = noise_list[i][:sample_num]
+            # noise = noise_list[i][:sample_num]
             # add noise for calculate real pesq
-            clean += noise
+            # clean += noise
             # for calculate seg_snr
             clean_frame = vec2frame(clean, 32, 8)
             sf.write(output_path + files[i][:-4] + '_clean.wav', clean, sr)
             sf.write('clean_cat.wav', clean, sr)
             # 低频部分的语音，最后cat在一起用
-            base, sr = sf.read(VALIDATION_DATA_PATH + files[i])
-            base = base[:sample_num]
-            # tmp 为半波整流之后获取相位用
-            tmp = base
-            tmp_low = base.copy()
-            base += noise
-            sf.write('base_cat.wav', base, sr)
-            base_mag = stft.spec_transform(stft.transform(torch.Tensor(base[np.newaxis, :]))).squeeze()
-            base_mag = base_mag.permute(1, 0)
+            # base, sr = sf.read(VALIDATION_DATA_PATH + files[i])
+            # sf.write(output_path + files[i][:-4] + '_base.wav', base, sr)
+            # base = base[:sample_num]
+            # base += noise
+
             p1 = pesq('clean_cat.wav', 'base_cat.wav', is_current_file=True)
             clean = torch.Tensor(clean).unsqueeze(0)
             clean_spec = stft.transform(clean)
@@ -88,9 +90,12 @@ def validation_pesq(net, output_path):
             clean_mag = torch.sqrt(clean_real ** 2 + clean_imag ** 2).cuda(CUDA_ID[0]).squeeze()
             # 切片
             speech_mag = speech_mag.squeeze()
+            # input_list = speech_mag.reshape(-1, speech_mag.size()[1] // 32, 32)
+            # base_list = base_mag.reshape(-1, speech_mag.size()[1] // 32, 32)
+            # clean_list = clean_mag.reshape(-1, speech_mag.size()[1] // 32, 32)
             base_list = []
-            input_list = []
             clean_list = []
+            input_list = []
             for k in range(int(speech_mag.size()[1] / 32)):
                 k *= 32
                 item = speech_mag[:, k:k + 32].cpu().detach().numpy()
@@ -109,29 +114,30 @@ def validation_pesq(net, output_path):
                 input_list = ((input_list.permute(0, 2, 1) - train_mean) / (train_var + torch.Tensor(np.array(EPSILON)).cuda(CUDA_ID[0]))).permute(0, 2, 1)
             # 送入网络
             est_speech = net(input_list[:, :65, :])
+            if NEED_NORM:
+                est_speech = est_speech * train_var[58:] + train_mean[58:]
             if IS_LOG:
                 est_speech = torch.exp(est_speech)
-            # 恢复语音
             est_mag = torch.cat((base_list.permute(0, 2, 1)[:, :, :58], est_speech), 2)
-            # 合并
+            # est_mag = torch.cat((base_list.permute(0, 2, 1)[:, :, :58], clean_list[:, :, 58:]), 2)
             half_lsd = loss_helper.mertics_LSD(est_mag, clean_list, is_full=False)
             full_lsd = loss_helper.mertics_LSD(est_mag, clean_list, is_full=True)
+            # 合并
             est_mag = est_mag.reshape(-1, est_mag.shape[2]).unsqueeze(0)
             "end"
 
             sum_full_lsd += full_lsd.item()
             sum_half_lsd += half_lsd.item()
-            # 获取半波整流后的相位
-            tmp[tmp < 0] = 0
-            tmp = torch.Tensor(tmp).unsqueeze(0)
-
+            # 获取低频相位信息
             tmp_low_spec = stft.transform(torch.Tensor(tmp_low[np.newaxis, :]))
             tmp_low_real = tmp_low_spec[:, :, :, 0]
             tmp_low_imag = tmp_low_spec[:, :, :, 1]
             tmp_low_mag = torch.sqrt(tmp_low_real ** 2 + tmp_low_imag ** 2).squeeze()
             "end"
 
-            # 获取相位信息
+            # 获取高频相位信息
+            tmp[tmp < 0] = 0
+            tmp = torch.Tensor(tmp).unsqueeze(0)
             tmp_spec = stft.transform(tmp)
             tmp_real = tmp_spec[:, :, :, 0]
             tmp_imag = tmp_spec[:, :, :, 1]
@@ -140,12 +146,16 @@ def validation_pesq(net, output_path):
             tmp_mag = torch.cat((tmp_low_mag[:, :65], tmp_mag.squeeze()[:, 65:]), 1)
             tmp_real = torch.cat((tmp_low_real.squeeze()[:, :65], tmp_real.squeeze()[:, 65:]), 1)
             tmp_imag = torch.cat((tmp_low_imag.squeeze()[:, :65], tmp_imag.squeeze()[:, 65:]), 1)
-            # TODO test
-            # test_real = test.detach().cpu() * tmp_real / tmp_mag
-            # test_imag = test.detach().cpu() * tmp_imag / tmp_mag
+            # 纯净语音的相位
+            # tmp_mag = clean_mag.detach().cpu()
+            # tmp_real = clean_real.detach().cpu()
+            # tmp_imag = clean_imag.detach().cpu()
+            # TODO e_test
+            # test_real = e_test.detach().cpu() * tmp_real / tmp_mag
+            # test_imag = e_test.detach().cpu() * tmp_imag / tmp_mag
             # test_res = torch.stack([test_real, test_imag], 3)
             # test_res = stft.inverse(test_res)
-            # sf.write('test.wav', test_res.numpy().squeeze(), sr)
+            # sf.write('e_test.wav', test_res.numpy().squeeze(), sr)
             # 恢复语音
             res_real = est_mag.detach().cpu() * tmp_real / tmp_mag
             res_imag = est_mag.detach().cpu() * tmp_imag / tmp_mag
@@ -153,7 +163,7 @@ def validation_pesq(net, output_path):
             res = stft.inverse(res_spec)
             sf.write(output_path + files[i][:-4] + '_res.wav', res.squeeze().detach().numpy(), sr)
             # 加噪
-            res += torch.Tensor(noise[: res.shape[1]])
+            # res += torch.Tensor(noise[: res.shape[1]])
             sf.write('res_cat.wav', res.numpy().squeeze(), sr)
             p2 = pesq('clean_cat.wav', 'res_cat.wav', is_current_file=True)
             res_frame = vec2frame(res, 32, 8)
@@ -172,7 +182,7 @@ def validation_pesq(net, output_path):
 def validation_stoi(net):
     net.eval()
     net.cuda(CUDA_ID[0])
-    files = os.listdir('/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x_abs/test/')
+    files = os.listdir('/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x_abs/e_test/')
     files.sort()
     sum_loss = 0
     stft = STFT(filter_length=FILTER_LENGTH, hop_length=HOP_LENGTH)
@@ -190,7 +200,7 @@ def validation_stoi(net):
             bar.update(i)
             # 经过滤波器的语音
             # input
-            speech, sr = sf.read('/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x_abs/test/' + files[i])
+            speech, sr = sf.read('/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x_abs/e_test/' + files[i])
             # 对齐∂
             nframe = (len(speech) - FILTER_LENGTH) // HOP_LENGTH + 1
             size = nframe % 32
@@ -212,7 +222,7 @@ def validation_stoi(net):
             time += 1
             clean += noise
             sf.write('clean.wav', clean, sr)
-            base, sr = sf.read('/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x_abs/test/' + files[i][:-8] + '.wav')
+            base, sr = sf.read('/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x_abs/e_test/' + files[i][:-8] + '.wav')
             base = base[:sample_num]
             tmp = base
             base += noise
@@ -269,10 +279,10 @@ def validation_stoi(net):
             # # revert
             # output = output * label_var[18:81].cuda(CUDA_ID[0]) + label_mean[18:81].cuda(CUDA_ID[0])
             # # TODO 测试
-            # test = output
-            # test = torch.exp(test)
-            # zeros = torch.zeros(1, test.size()[1], 18).cuda(CUDA_ID[0])
-            # test = torch.cat((zeros, test), 2)
+            # e_test = output
+            # e_test = torch.exp(e_test)
+            # zeros = torch.zeros(1, e_test.size()[1], 18).cuda(CUDA_ID[0])
+            # e_test = torch.cat((zeros, e_test), 2)
             # # 构造预测的谱，前20个频点使用已知的，后边141个频点使用预测的
             # est_mag = torch.cat((speech_mag[:, 0:18, :], output.permute(0, 2, 1)), 1).permute(0, 2, 1)
             "end"
@@ -290,12 +300,12 @@ def validation_stoi(net):
             tmp_imag = tmp_spec[:, :, :, 1]
             tmp_mag = torch.sqrt(tmp_real ** 2 + tmp_imag ** 2)
             # 恢复语音
-            # TODO test
-            # test_real = test.detach().cpu() * tmp_real / tmp_mag
-            # test_imag = test.detach().cpu() * tmp_imag / tmp_mag
+            # TODO e_test
+            # test_real = e_test.detach().cpu() * tmp_real / tmp_mag
+            # test_imag = e_test.detach().cpu() * tmp_imag / tmp_mag
             # test_res = torch.stack([test_real, test_imag], 3)
             # test_res = stft.inverse(test_res)
-            # sf.write('test.wav', test_res.numpy().squeeze(), sr)
+            # sf.write('e_test.wav', test_res.numpy().squeeze(), sr)
 
             res_real = est_mag.detach().cpu() * tmp_real / (tmp_mag + EPSILON)
             res_imag = est_mag.detach().cpu() * tmp_imag / (tmp_mag + EPSILON)
@@ -343,7 +353,7 @@ def validation_stoi(net):
 #         tmp = speech
 #         sf.write(files[i], tmp, sr)
 #         # speech, sr = sf.read('/home/yangyang/PycharmProjects/low_frequency_predict_high_frequency/train/REC40_R.wav')
-#         # test label，为了计算loss
+#         # e_test label，为了计算loss
 #         clean, sr = sf.read('/home/yangyang/userspace/data/TIMIT_low_pass/8k/test_label/' + files[i], dtype='float32')
 #         clean = clean[:sample_num]
 #         sf.write(files[i][:-4] + '_clean.wav', clean, sr)
@@ -535,7 +545,7 @@ def real_data_validation_d_net(d_net):
 
 
 def fake_data_validation_d_net(g_net, d_net):
-    path = '/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x_abs/test/'
+    path = '/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x_abs/e_test/'
     g_net.eval()
     g_net.cuda(CUDA_ID[0])
     d_net.eval()
@@ -559,7 +569,7 @@ def fake_data_validation_d_net(g_net, d_net):
             speech = speech[:sample_num]
             speech[speech < 0] = 0
             speech = np.sqrt(speech)
-            # test label，为了计算loss
+            # e_test label，为了计算loss
             clean, sr = sf.read('/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x_abs/test_label/' + files[i][:-8] + '.wav')
             clean = clean[:sample_num]
             # 加噪
@@ -629,7 +639,7 @@ def fake_data_validation_d_net(g_net, d_net):
 def cal_metrics(g_net):
     g_net.eval()
     g_net.cuda(CUDA_ID[0])
-    files = os.listdir('/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x_abs/test/')
+    files = os.listdir('/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x_abs/e_test/')
     files.sort()
     stft = STFT(filter_length=FILTER_LENGTH, hop_length=HOP_LENGTH)
     noise_list = np.load('noise_4_TIMIT.npy', allow_pickle=True)
@@ -642,7 +652,7 @@ def cal_metrics(g_net):
         if files[i].endswith('_abs.wav'):
         # 经过滤波器的语音
             # input
-            speech, sr = sf.read('/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x_abs/test/' + files[i])
+            speech, sr = sf.read('/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x_abs/e_test/' + files[i])
             # 对齐
             nframe = (len(speech) - FILTER_LENGTH) // HOP_LENGTH + 1
             size = nframe % 32
@@ -651,14 +661,14 @@ def cal_metrics(g_net):
             speech = speech[:sample_num]
             # speech[speech < 0] = 0
             # speech = np.sqrt(speech)
-            # test label，为了计算loss
+            # e_test label，为了计算loss
             clean, sr = sf.read('/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x_abs/test_label/' + files[i][:-8] + '.wav')
             clean = clean[:sample_num]
             # 加噪
             noise = noise_list[time]
             time += 1
             clean += noise
-            base, sr = sf.read('/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x_abs/test/' + files[i][:-8] + '.wav')
+            base, sr = sf.read('/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x_abs/e_test/' + files[i][:-8] + '.wav')
             base = base[:sample_num]
             tmp = base
             # input
@@ -744,7 +754,7 @@ if __name__ == '__main__':
     g_net = GeneratorNet()
     # res = resume_model(g_net, MODEL_STORE + 'IEEE_pre_train_g_learn_speech_with_noise_sigmoid_10/model_16000.pkl')
     # res = resume_model(g_net, MODEL_STORE + 'TIMIT_abs_train_learn_speech_with_sn_without_noise_sigmoid_10_mse_10_lr_1e-4/g_model_18000.pkl')
-    res = resume_model(g_net, MODEL_STORE + 'TIMIT_train_learn_speech_with_sn/g_model_14000.pkl')
+    res = resume_model(g_net, MODEL_STORE + 'TIMIT_pre_train_learn_speech_with_sn_lsd/model_27000.pkl')
     # real_data_validation_d_net(d_net)
     # fake_data_validation_d_net(g_net, d_net)
     # seg_snr, half_lsd, full_lsd = cal_metrics(g_net)
@@ -760,7 +770,7 @@ if __name__ == '__main__':
     # print('res stoi : ' + str(res_stoi))
     # print('promote stoi : ' + str(promote_stoi))
     print('====================================')
-    output_path = '/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x/adversarial_train_4_SSR_8k/'
+    output_path = '/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x/adversarial_train_4_SSR_lsd_27k/'
     if os.path.exists(output_path):
         shutil.rmtree(output_path)
     os.mkdir(output_path)

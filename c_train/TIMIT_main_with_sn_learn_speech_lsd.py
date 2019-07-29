@@ -70,7 +70,7 @@ def validation_pesq(net, feature_creator):
             clean += noise
             # for calculate seg_snr
             clean_frame = vec2frame(clean, 32, 8)
-            sf.write('clean_cat.wav', clean, sr)
+            sf.write('clean_lsd.wav', clean, sr)
             # 低频部分的语音，最后cat在一起用
             base, sr = sf.read(VALIDATION_DATA_PATH + files[i])
             base = base[:sample_num]
@@ -78,10 +78,10 @@ def validation_pesq(net, feature_creator):
             tmp = base
             tmp_low = base.copy()
             base += noise
-            sf.write('base_cat.wav', base, sr)
+            sf.write('base_lsd.wav', base, sr)
             base_mag = stft.spec_transform(stft.transform(torch.Tensor(base[np.newaxis, :]))).squeeze()
             base_mag = base_mag.permute(1, 0)
-            p1 = pesq('clean_cat.wav', 'base_cat.wav', is_current_file=True)
+            p1 = pesq('clean_lsd.wav', 'base_lsd.wav', is_current_file=True)
             clean = torch.Tensor(clean).unsqueeze(0)
             clean_spec = stft.transform(clean)
             clean_real = clean_spec[:, :, :, 0]
@@ -110,6 +110,8 @@ def validation_pesq(net, feature_creator):
                 input_list = ((input_list.permute(0, 2, 1) - train_mean) / (train_var + torch.Tensor(np.array(EPSILON)).cuda(CUDA_ID[0]))).permute(0, 2, 1)
             # 送入网络
             est_speech = net(input_list[:, :65, :])
+            if NEED_NORM:
+                est_speech = est_speech * train_var[58:] + train_mean[58:]
             if IS_LOG:
                 est_speech = torch.exp(est_speech)
             # 恢复语音
@@ -155,8 +157,8 @@ def validation_pesq(net, feature_creator):
             # sf.write(files[i][:-4] + '_res.wav', res.squeeze().detach().numpy(), sr)
             # 加噪
             res += torch.Tensor(noise[: res.shape[1]])
-            sf.write('res_cat.wav', res.numpy().squeeze(), sr)
-            p2 = pesq('clean_cat.wav', 'res_cat.wav', is_current_file=True)
+            sf.write('res_lsd.wav', res.numpy().squeeze(), sr)
+            p2 = pesq('clean_lsd.wav', 'res_lsd.wav', is_current_file=True)
             res_frame = vec2frame(res, 32, 8)
             loss_helper = LossHelper()
             seg_snr = loss_helper.seg_SNR_(torch.Tensor(res_frame), torch.Tensor(clean_frame))
@@ -169,10 +171,53 @@ def validation_pesq(net, feature_creator):
     bar.finish()
     return base_pesq / VALIDATION_DATA_NUM, res_pesq / VALIDATION_DATA_NUM, promote_pesq / VALIDATION_DATA_NUM, sum_seg_snr / VALIDATION_DATA_NUM, sum_half_lsd / VALIDATION_DATA_NUM, sum_full_lsd / VALIDATION_DATA_NUM
 
+# 预训练生成器
+def pre_train_g(net, epoch, data_loader, loss_helper, optimizer):
+    global pre_train_global_step
+    path = 'TIMIT_pre_train_learn_speech_with_sn_lsd/'
+    if not os.path.exists(LOG_STORE + path):
+        os.mkdir(LOG_STORE + path)
+    if not os.path.exists(MODEL_STORE + path):
+        os.mkdir(MODEL_STORE + path)
+    log_store = LOG_STORE + path
+    model_store = MODEL_STORE + path
+    writer = SummaryWriter(log_store)
+    feature_creator = FeatureCreator()
+    sum_loss = 0
+    bar = progressbar.ProgressBar(0, train_cdnn_data_set.__len__() // TRAIN_BATCH_SIZE)
+    for i in range(epoch):
+        bar.start()
+        for batch_idx, batch_infos in enumerate(data_loader.get_data_loader()):
+            bar.update(batch_idx)
+            g_input, g_label = feature_creator(batch_infos)
+            optimizer.zero_grad()
+            # 半波整流的送入网络
+            est_speech = net(g_input[:, :, :65].permute(0, 2, 1))
+            loss = loss_helper.LSD_loss(est_speech, g_label[:, :, 58:])
+            sum_loss += loss.item()
+            loss.backward()
+            optimizer.step()
+            if pre_train_global_step % 100 == 0 and pre_train_global_step != 0:
+                writer.add_scalar('Train/Loss', sum_loss / 100, pre_train_global_step)
+                sum_loss = 0
+            if pre_train_global_step % 1000 == 0 and pre_train_global_step != 0:
+                save_model(pre_train_global_step, net, optimizer, loss.item(),
+                           model_store + 'model_' + str(pre_train_global_step) + '.pkl')
+                base_pesq, res_pesq, promote_pesq, seg_snr, half_lsd, full_lsd = validation_pesq(net, feature_creator)
+                writer.add_scalar('Metrics/seg_snr', seg_snr, pre_train_global_step)
+                writer.add_scalar('Metrics/LSD/half_lsd', half_lsd, pre_train_global_step)
+                writer.add_scalar('Metrics/LSD/full_lsd', full_lsd, pre_train_global_step)
+                writer.add_scalar('Metrics/PESQ/base_pesq', base_pesq, pre_train_global_step)
+                writer.add_scalar('Metrics/PESQ/res_pesq', res_pesq, pre_train_global_step)
+                writer.add_scalar('Metrics/PESQ/promote_pesq', promote_pesq, pre_train_global_step)
+                net.train()
+            pre_train_global_step += 1
+        bar.finish()
+
 
 def train(g_net, d_net, g_opt, d_opt, epoch, data_loader, loss_helper):
     global global_step
-    path_dir = 'TIMIT_train_learn_speech_with_sn/'
+    path_dir = 'TIMIT_train_learn_speech_with_sn_lsd/'
     # create log and module store
     if not os.path.exists(LOG_STORE + path_dir):
         os.mkdir(LOG_STORE + path_dir)
@@ -247,7 +292,7 @@ def train(g_net, d_net, g_opt, d_opt, epoch, data_loader, loss_helper):
             adversarial_loss = loss_helper.generator_loss_with_sigmoid(logits_fake)
             # TODO cat(norm, log_spec)
             # mse : 预测的语音更像归一化之后的
-            reconstruction_loss = loss_helper.MSE_loss(est_speech, g_label[:, :, 58:])
+            reconstruction_loss = loss_helper.LSD_loss(est_speech, g_label[:, :, 58:])
             g_loss = adversarial_loss + lambda_for_rec_loss * reconstruction_loss
             g_loss.backward()
             g_opt.step()
@@ -272,12 +317,12 @@ def train(g_net, d_net, g_opt, d_opt, epoch, data_loader, loss_helper):
                 save_model(global_step, generator, g_opt, g_loss.item(), module_store + 'g_model_' + str(global_step) + '.pkl')
                 save_discriminator_model(global_step, discriminator, discriminator_opt, real_loss.item(), fake_loss.item(), module_store + 'd_model_' + str(global_step) + '.pkl')
                 base_pesq, res_pesq, promote_pesq, seg_snr, half_lsd, full_lsd = validation_pesq(g_net, feature_creator)
-                writer.add_scalar('SegSNR/seg_snr', seg_snr, global_step)
-                writer.add_scalar('LSD/half_lsd', half_lsd, global_step)
-                writer.add_scalar('LSD/full_lsd', full_lsd, global_step)
-                writer.add_scalar('PESQ/base_pesq', base_pesq, global_step)
-                writer.add_scalar('PESQ/res_pesq', res_pesq, global_step)
-                writer.add_scalar('PESQ/promote_pesq', promote_pesq, global_step)
+                writer.add_scalar('Metrics/seg_snr', seg_snr, global_step)
+                writer.add_scalar('Metrics/LSD/half_lsd', half_lsd, global_step)
+                writer.add_scalar('Metrics/LSD/full_lsd', full_lsd, global_step)
+                writer.add_scalar('Metrics/PESQ/base_pesq', base_pesq, global_step)
+                writer.add_scalar('Metrics/PESQ/res_pesq', res_pesq, global_step)
+                writer.add_scalar('Metrics/PESQ/promote_pesq', promote_pesq, global_step)
                 g_net.train()
             global_step += 1
         bar.finish()
@@ -294,25 +339,25 @@ if __name__ == "__main__":
     train_data_loader = SpeechDataLoader(data_set=train_cdnn_data_set,
                                          batch_size=TRAIN_BATCH_SIZE,
                                          is_shuffle=True)
-    pre_train_g_tag = False
+    pre_train_g_tag = True
     pre_train_d_tag = False
-    train_tag = True
+    train_tag = False
 
     # "pre train generator"
-    # if pre_train_g_tag:
-    #     net = GeneratorNet()
-    #     # res = resume_model(net, MODEL_STORE + 'IEEE_pre_train_g_learn_speech_with_noise/model_666000.pkl')
-    #     net = net.cuda(CUDA_ID[0])
-    #     train_loss_helper = LossHelper()
-    #     train_optimizer = optim.Adam(net.parameters(), lr=1e-5)
-    #     # base_pesq, res_pesq, promote_pesq, seg_snr, half_lsd, full_lsd = validation_pesq(net)
-    #     # print('base pesq : ' + str(base_pesq))
-    #     # print('res pesq : ' + str(res_pesq))
-    #     # print('promote pesq : ' + str(promote_pesq))
-    #     # print('seg snr : ' + str(seg_snr))
-    #     # print('full lsd : ' + str(full_lsd))
-    #     # print('half lsd : ' + str(half_lsd))
-    #     pre_train_g(net, EPOCH, train_data_loader, train_loss_helper, train_optimizer)
+    if pre_train_g_tag:
+        net = GeneratorNet()
+        # res = resume_model(net, MODEL_STORE + 'IEEE_pre_train_g_learn_speech_with_noise/model_666000.pkl')
+        net = net.cuda(CUDA_ID[0])
+        train_loss_helper = LossHelper()
+        train_optimizer = optim.Adam(net.parameters(), lr=1e-4)
+        # base_pesq, res_pesq, promote_pesq, seg_snr, half_lsd, full_lsd = validation_pesq(net)
+        # print('base pesq : ' + str(base_pesq))
+        # print('res pesq : ' + str(res_pesq))
+        # print('promote pesq : ' + str(promote_pesq))
+        # print('seg snr : ' + str(seg_snr))
+        # print('full lsd : ' + str(full_lsd))
+        # print('half lsd : ' + str(half_lsd))
+        pre_train_g(net, EPOCH, train_data_loader, train_loss_helper, train_optimizer)
     # "pre train discrimintor"
     # if pre_train_d_tag:
     #     generator = GeneratorNet()

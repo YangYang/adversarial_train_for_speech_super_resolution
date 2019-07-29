@@ -4,7 +4,7 @@ import os
 cur_path = os.path.abspath(os.path.dirname(__file__))
 PROJECT_NAME = os.path.split(cur_path)[1]
 
-# c_train：tr validation：cv test：tt
+# c_train：tr validation：cv e_test：tt
 # TYPE = 'tr'
 # c_train
 EPOCH = 1000

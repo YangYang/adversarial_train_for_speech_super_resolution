@@ -65,6 +65,7 @@ class STFT(torch.nn.Module):
                                                Variable(self.inverse_basis, requires_grad=False),
                                                stride=self.hop_length,
                                                padding=0)
+        inverse_transform /= 2
         return inverse_transform[:, 0, :]
 
     def forward(self, input_data):

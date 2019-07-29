@@ -44,6 +44,7 @@ def validation_pesq(net, feature_creator):
         else:
             train_mean = feature_creator.train_mean
             train_var = feature_creator.train_var
+    tag = 0
     for i in range(len(files)):
         if not files[i].endswith('_noise.wav') and files[i].endswith('.wav'):
             bar.update(i)
@@ -70,7 +71,7 @@ def validation_pesq(net, feature_creator):
             clean += noise
             # for calculate seg_snr
             clean_frame = vec2frame(clean, 32, 8)
-            sf.write('clean_cat.wav', clean, sr)
+            sf.write('clean.wav', clean, sr)
             # 低频部分的语音，最后cat在一起用
             base, sr = sf.read(VALIDATION_DATA_PATH + files[i])
             base = base[:sample_num]
@@ -78,10 +79,10 @@ def validation_pesq(net, feature_creator):
             tmp = base
             tmp_low = base.copy()
             base += noise
-            sf.write('base_cat.wav', base, sr)
+            sf.write('base.wav', base, sr)
             base_mag = stft.spec_transform(stft.transform(torch.Tensor(base[np.newaxis, :]))).squeeze()
             base_mag = base_mag.permute(1, 0)
-            p1 = pesq('clean_cat.wav', 'base_cat.wav', is_current_file=True)
+            p1 = pesq('clean.wav', 'base.wav', is_current_file=True)
             clean = torch.Tensor(clean).unsqueeze(0)
             clean_spec = stft.transform(clean)
             clean_real = clean_spec[:, :, :, 0]
@@ -110,6 +111,8 @@ def validation_pesq(net, feature_creator):
                 input_list = ((input_list.permute(0, 2, 1) - train_mean) / (train_var + torch.Tensor(np.array(EPSILON)).cuda(CUDA_ID[0]))).permute(0, 2, 1)
             # 送入网络
             est_speech = net(input_list[:, :65, :])
+            if NEED_NORM:
+                est_speech = est_speech * train_var[58:] + train_mean[58:]
             if IS_LOG:
                 est_speech = torch.exp(est_speech)
             # 恢复语音
@@ -155,8 +158,8 @@ def validation_pesq(net, feature_creator):
             # sf.write(files[i][:-4] + '_res.wav', res.squeeze().detach().numpy(), sr)
             # 加噪
             res += torch.Tensor(noise[: res.shape[1]])
-            sf.write('res_cat.wav', res.numpy().squeeze(), sr)
-            p2 = pesq('clean_cat.wav', 'res_cat.wav', is_current_file=True)
+            sf.write('res.wav', res.numpy().squeeze(), sr)
+            p2 = pesq('clean.wav', 'res.wav', is_current_file=True)
             res_frame = vec2frame(res, 32, 8)
             loss_helper = LossHelper()
             seg_snr = loss_helper.seg_SNR_(torch.Tensor(res_frame), torch.Tensor(clean_frame))
@@ -172,7 +175,7 @@ def validation_pesq(net, feature_creator):
 
 def train(g_net, d_net, g_opt, d_opt, epoch, data_loader, loss_helper):
     global global_step
-    path_dir = 'TIMIT_train_learn_speech_with_sn/'
+    path_dir = 'TIMIT_train_learn_speech_with_sn_with_norm/'
     # create log and module store
     if not os.path.exists(LOG_STORE + path_dir):
         os.mkdir(LOG_STORE + path_dir)
@@ -223,7 +226,7 @@ def train(g_net, d_net, g_opt, d_opt, epoch, data_loader, loss_helper):
             # fake_input = torch.cat((speech_low_pass_mag[:, :, 0:35], est_speech), 2)
             # fake_input = torch.autograd.Variable(fake_input, requires_grad=True)
             # input to d_net, fake_input shape is (B,F,T,1), especially F is K + N = 65 + 71 = 136
-            # TODO cat(norm, log_spec)
+            # TODO who cat who ???
             fake_input = torch.cat((g_input[:, :, :65], est_speech), 2).permute(0, 2, 1).unsqueeze(3)
             logits_fake = d_net(fake_input)
             fake_loss = loss_helper.discriminator_loss_with_sigmoid(logits_fake, is_fake=True)
@@ -239,14 +242,11 @@ def train(g_net, d_net, g_opt, d_opt, epoch, data_loader, loss_helper):
 
             "2. train g_net"
             g_opt.zero_grad()
-            #
             est_speech = g_net(g_input[:, :, :65].permute(0, 2, 1))
             # fake_input = torch.cat((speech_low_pass_mag[:, :, 0:35], est_speech), 2)
             fake_input = torch.cat((g_input[:, :, :65], est_speech), 2).permute(0, 2, 1).unsqueeze(3)
             logits_fake = d_net(fake_input)
             adversarial_loss = loss_helper.generator_loss_with_sigmoid(logits_fake)
-            # TODO cat(norm, log_spec)
-            # mse : 预测的语音更像归一化之后的
             reconstruction_loss = loss_helper.MSE_loss(est_speech, g_label[:, :, 58:])
             g_loss = adversarial_loss + lambda_for_rec_loss * reconstruction_loss
             g_loss.backward()

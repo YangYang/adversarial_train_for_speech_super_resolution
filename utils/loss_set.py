@@ -51,7 +51,7 @@ class LossHelper(object):
     def LSD_loss(est, label):
         # loss = (torch.sum(torch.sqrt(torch.sum(torch.pow(label - est, 2), 2) / est.size()[2]), 1) / est.size()[1]).mean()
         # loss = (torch.log(label + EPSILON) - torch.log(est + EPSILON)).pow(2).mean(2).sqrt().mean(1).mean()
-        loss = (label - est).pow(2).mean(2).mean(1).mean()
+        loss = (label - est).pow(2).mean(2).sqrt().mean(1).mean()
         # loss = torch.sum(torch.sqrt(torch.sum(torch.pow(label - est, 2), 1) / est.size()[1])) / est.size()[0]
         return loss
 
@@ -119,8 +119,7 @@ class LossHelper(object):
         if batch_first:
             seg_sng = torch.sum(10.0 * torch.log10(torch.sum(torch.pow(real, 2), 2) / torch.sum(torch.pow(real - est, 2), 2)), 1) / real.size()[1]
         else:
-            seg_sng = torch.sum(
-                10.0 * torch.log10(torch.sum(torch.pow(real, 2), 1) / torch.sum(torch.pow(real - est, 2), 1)), 0) / real.size()[0]
+            seg_sng = torch.sum(10.0 * torch.log10(torch.sum(torch.pow(real, 2), 1) / torch.sum(torch.pow(real - est, 2), 1)), 0) / real.size()[0]
         return seg_sng
 
     @staticmethod
@@ -131,8 +130,9 @@ class LossHelper(object):
         :param real:(B,T,F) 真实的语音
         :return:分段SNR
         """
-        seg_sng = (10.0 * torch.log10(torch.sum(torch.pow(real, 2), 1) / (torch.sum(torch.pow(real - est, 2), 1) + EPSILON))).mean()
-        return seg_sng
+        # seg_snr = ((real.pow(2).sum(1) / (est - real).pow(2).sum(1)).log10() * 10).mean()
+        seg_snr = (10.0 * torch.log10(torch.sum(torch.pow(real, 2), 1) / (torch.sum(torch.pow(real - est, 2), 1) + EPSILON))).mean()
+        return seg_snr
 
     @staticmethod
     def mertics_LSD(est, label, is_full=True):
@@ -144,9 +144,10 @@ class LossHelper(object):
         :return:
         """
         if is_full:
-            lsd = (torch.log(label + EPSILON) - torch.log(est + EPSILON)).pow(2).mean(2).sqrt().mean(1).mean(0)
+            lsd = (label - est).pow(2).mean(2).sqrt().mean(1).mean(0)
+            # lsd = (torch.log(label + EPSILON) - torch.log(est + EPSILON)).pow(2).mean(2).sqrt().mean(1).mean(0)
         else:
-            est_half = torch.log(est[:, :, 18:81] + EPSILON)
-            label_half = torch.log(label[:, :, 18:81] + EPSILON)
+            est_half = est[:, :, 58:]
+            label_half = label[:, :, 58:]
             lsd = (label_half - est_half).pow(2).mean(2).sqrt().mean(1).mean(0)
         return lsd
