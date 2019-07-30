@@ -11,7 +11,7 @@ from utils.pesq import pesq
 from scipy.io import loadmat, savemat
 from utils.loss_set import LossHelper
 from pystoi.stoi import stoi
-from a_net.module_with_SN_8k_2x import GeneratorNet, DiscriminatorNet
+from a_net.cgan_module_with_SN_8k_2x import GeneratorNet, DiscriminatorNet
 import shutil
 from tensorboardX import SummaryWriter
 
@@ -112,8 +112,9 @@ def validation_pesq(net, output_path):
             # normalized
             if NEED_NORM:
                 input_list = ((input_list.permute(0, 2, 1) - train_mean) / (train_var + torch.Tensor(np.array(EPSILON)).cuda(CUDA_ID[0]))).permute(0, 2, 1)
+            z = torch.Tensor(np.random.normal(0, 1, (input_list.size()[0], 65, 32))).cuda(CUDA_ID[0])
             # 送入网络
-            est_speech = net(input_list[:, :65, :])
+            est_speech = net(z, input_list[:, :65, :])
             if NEED_NORM:
                 est_speech = est_speech * train_var[58:] + train_mean[58:]
             if IS_LOG:
@@ -924,7 +925,7 @@ if __name__ == '__main__':
     g_net = GeneratorNet()
     # res = resume_model(g_net, MODEL_STORE + 'IEEE_pre_train_g_learn_speech_with_noise_sigmoid_10/model_16000.pkl')
     # res = resume_model(g_net, MODEL_STORE + 'TIMIT_abs_train_learn_speech_with_sn_without_noise_sigmoid_10_mse_10_lr_1e-4/g_model_18000.pkl')
-    res = resume_model(g_net, MODEL_STORE + 'TIMIT_pre_train_learn_speech_with_sn_mse_mag/model_82000.pkl')
+    res = resume_model(g_net, MODEL_STORE + 'cgan/g_model_36000.pkl')
     # real_data_validation_d_net(d_net)
     # fake_data_validation_d_net(g_net, d_net)
     # seg_snr, half_lsd, full_lsd = cal_metrics(g_net)
@@ -940,7 +941,7 @@ if __name__ == '__main__':
     # print('res stoi : ' + str(res_stoi))
     # print('promote stoi : ' + str(promote_stoi))
     print('====================================')
-    output_path = '/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x/adversarial_train_4_SSR_mse_mag_82k/'
+    output_path = '/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x/cgan_36k/'
     if os.path.exists(output_path):
         shutil.rmtree(output_path)
     os.mkdir(output_path)

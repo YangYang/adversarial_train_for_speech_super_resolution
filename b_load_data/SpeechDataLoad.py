@@ -118,10 +118,7 @@ class FeatureCreator(nn.Module):
     def forward(self, batch_info):
         # label 63
         # 计算幅度谱
-        speech_low_pass_spec = self.stft.transform(batch_info.train_wav.transpose(1, 0).cuda(CUDA_ID[0]))
-        speech_low_pass_real = speech_low_pass_spec[:, :, :, 0]
-        speech_low_pass_imag = speech_low_pass_spec[:, :, :, 1]
-        g_input = torch.sqrt(speech_low_pass_real ** 2 + speech_low_pass_imag ** 2)
+        g_input = self.stft.spec_transform(self.stft.transform(batch_info.train_wav.transpose(1, 0).cuda(CUDA_ID[0])))
         # label mag
         speech_spec = self.stft.transform(batch_info.label.transpose(1, 0).cuda(CUDA_ID[0]))
         g_label = self.label_helper(speech_spec)

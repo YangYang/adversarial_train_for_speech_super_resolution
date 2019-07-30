@@ -7,7 +7,7 @@ import torch
 import soundfile as sf
 import librosa
 import numpy as np
-from a_net.module_with_SN_8k_2x import GeneratorNet, DiscriminatorNet
+from a_net.cgan_module_with_SN_8k_2x import GeneratorNet, DiscriminatorNet
 from b_load_data.SpeechDataLoad import SpeechDataLoader, SpeechDataset, FeatureCreator
 import torch.optim as optim
 from utils.model_handle import save_model, resume_model, save_discriminator_model
@@ -35,7 +35,7 @@ def validation_pesq(net, feature_creator):
     sum_seg_snr = 0
     sum_full_lsd = 0
     sum_half_lsd = 0
-    noise_list = np.load('noise_4_TIMIT_new.npy', allow_pickle=True)
+    # noise_list = np.load('noise_4_TIMIT_new.npy', allow_pickle=True)
     loss_helper = LossHelper()
     if NEED_NORM:
         if IS_LOG:
@@ -65,23 +65,23 @@ def validation_pesq(net, feature_creator):
             # label，为了计算pesq
             clean, sr = sf.read(VALIDATION_DATA_LABEL_PATH + files[i])
             clean = clean[:sample_num]
-            noise = noise_list[i][:sample_num]
+            # noise = noise_list[i][:sample_num]
             # add noise for calculate real pesq
-            clean += noise
+            # clean += noise
             # for calculate seg_snr
             clean_frame = vec2frame(clean, 32, 8)
-            sf.write('clean_lsd.wav', clean, sr)
+            sf.write('clean_cgan.wav', clean, sr)
             # 低频部分的语音，最后cat在一起用
             base, sr = sf.read(VALIDATION_DATA_PATH + files[i])
             base = base[:sample_num]
             # tmp 为半波整流之后获取相位用
             tmp = base
             tmp_low = base.copy()
-            base += noise
-            sf.write('base_lsd.wav', base, sr)
+            # base += noise
+            sf.write('base_cgan.wav', base, sr)
             base_mag = stft.spec_transform(stft.transform(torch.Tensor(base[np.newaxis, :]))).squeeze()
             base_mag = base_mag.permute(1, 0)
-            p1 = pesq('clean_lsd.wav', 'base_lsd.wav', is_current_file=True)
+            p1 = pesq('clean_cgan.wav', 'base_cgan.wav', is_current_file=True)
             clean = torch.Tensor(clean).unsqueeze(0)
             clean_spec = stft.transform(clean)
             clean_real = clean_spec[:, :, :, 0]
@@ -108,8 +108,9 @@ def validation_pesq(net, feature_creator):
             # normalized
             if NEED_NORM:
                 input_list = ((input_list.permute(0, 2, 1) - train_mean) / (train_var + torch.Tensor(np.array(EPSILON)).cuda(CUDA_ID[0]))).permute(0, 2, 1)
+            z = torch.Tensor(np.random.normal(0, 1, (input_list.size()[0], 65, 32))).cuda(CUDA_ID[0])
             # 送入网络
-            est_speech = net(input_list[:, :65, :])
+            est_speech = net(z, input_list[:, :65, :])
             if NEED_NORM:
                 est_speech = est_speech * train_var[58:] + train_mean[58:]
             if IS_LOG:
@@ -156,9 +157,9 @@ def validation_pesq(net, feature_creator):
             res = stft.inverse(res_spec)
             # sf.write(files[i][:-4] + '_res.wav', res.squeeze().detach().numpy(), sr)
             # 加噪
-            res += torch.Tensor(noise[: res.shape[1]])
-            sf.write('res_lsd.wav', res.numpy().squeeze(), sr)
-            p2 = pesq('clean_lsd.wav', 'res_lsd.wav', is_current_file=True)
+            # res += torch.Tensor(noise[: res.shape[1]])
+            sf.write('res_cgan.wav', res.numpy().squeeze(), sr)
+            p2 = pesq('clean_cgan.wav', 'res_cgan.wav', is_current_file=True)
             res_frame = vec2frame(res, 32, 8)
             loss_helper = LossHelper()
             seg_snr = loss_helper.seg_SNR_(torch.Tensor(res_frame), torch.Tensor(clean_frame))
@@ -174,7 +175,7 @@ def validation_pesq(net, feature_creator):
 # 预训练生成器
 def pre_train_g(net, epoch, data_loader, loss_helper, optimizer):
     global pre_train_global_step
-    path = 'TIMIT_pre_train_learn_speech_with_sn_lsd/'
+    path = 'cgan/'
     if not os.path.exists(LOG_STORE + path):
         os.mkdir(LOG_STORE + path)
     if not os.path.exists(MODEL_STORE + path):
@@ -189,11 +190,13 @@ def pre_train_g(net, epoch, data_loader, loss_helper, optimizer):
         bar.start()
         for batch_idx, batch_infos in enumerate(data_loader.get_data_loader()):
             bar.update(batch_idx)
+            z = torch.Tensor(np.random.normal(0, 1, (64, 65, 32))).cuda(CUDA_ID[0])
             # normalized LPS g_input; LPS g_label
             g_input, g_label = feature_creator(batch_infos)
             optimizer.zero_grad()
-            est_speech = net(g_input[:, :, :65].permute(0, 2, 1))
-            loss = loss_helper.LSD_loss(est_speech, g_label[:, :, 58:])
+            # 64, 65, 32
+            est_speech = net(g_input[:, :, :65].permute(0, 2, 1), z)
+            loss = loss_helper.MSE_loss(est_speech, g_label[:, :, 58:])
             sum_loss += loss.item()
             loss.backward()
             optimizer.step()
@@ -217,7 +220,7 @@ def pre_train_g(net, epoch, data_loader, loss_helper, optimizer):
 
 def train(g_net, d_net, g_opt, d_opt, epoch, data_loader, loss_helper):
     global global_step
-    path_dir = 'TIMIT_train_learn_speech_with_sn_lsd/'
+    path_dir = 'cgan/'
     # create log and module store
     if not os.path.exists(LOG_STORE + path_dir):
         os.mkdir(LOG_STORE + path_dir)
@@ -246,73 +249,46 @@ def train(g_net, d_net, g_opt, d_opt, epoch, data_loader, loss_helper):
             # noinspection PyUnresolvedReferences
             g_label = torch.autograd.Variable(g_label, requires_grad=True)
             # fake_input = torch.autograd.Variable(fake_input, requires_grad=True)
+            z = torch.Tensor(np.random.normal(0, 1, (64, 65, 32))).cuda(CUDA_ID[0])
+
+            "2. train g_net"
+            g_opt.zero_grad()
+            g_output = g_net(z, g_input[:, :, :65].permute(0, 2, 1))
+            # 高频和低频cat
+            logits_fake = d_net(g_output, g_input)
+            adversarial_loss = loss_helper.generator_loss_with_sigmoid(logits_fake)
+            g_loss = adversarial_loss
+            g_loss.backward()
+            g_sum_loss += g_loss.item()
+            g_opt.step()
+            "end"
 
             "1. train d_net"
             # 1.1 real
             d_opt.zero_grad()
-            # d_net输入的是归一化后的g_input和g_label cat在一起的，即32 * (K + N)
-            speech_real_input = torch.cat((g_input[:, :, :65], g_label[:, :, 58:]), 2)
-            speech_real_input = speech_real_input.permute(0, 2, 1)
-            speech_real_input = speech_real_input.unsqueeze(3)
-            # input: B, F, T, 1
-            # output: B, 1
-            logits_real = d_net(speech_real_input)
+            # 高频的label和低频输入
+            logits_real = d_net(g_label[:, :, 58:], g_input)
             real_loss = loss_helper.discriminator_loss_with_sigmoid(logits_real, is_fake=False)
-            real_loss.backward(retain_graph=True)
             sum_real_loss += real_loss.item()
 
 
             # 1.2 fake
             # B, F, T
-            est_speech = g_net(g_input[:, :, :65].permute(0, 2, 1))
-            # fake_input = torch.cat((speech_low_pass_mag[:, :, 0:35], est_speech), 2)
-            # fake_input = torch.autograd.Variable(fake_input, requires_grad=True)
-            # input to d_net, fake_input shape is (B,F,T,1), especially F is K + N = 65 + 71 = 136
-            # TODO cat(norm, log_spec)
-            fake_input = torch.cat((g_input[:, :, :65], est_speech), 2).permute(0, 2, 1).unsqueeze(3)
-            logits_fake = d_net(fake_input)
+            # 输出和低频输入
+            logits_fake = d_net(g_output.detach(), g_input)
             fake_loss = loss_helper.discriminator_loss_with_sigmoid(logits_fake, is_fake=True)
-            # disc_reg = discriminator_regularizer(logits_real, real_label, logits_fake, fake_input, d_net, d_opt)
-            # sum_disc_reg += disc_reg.item()
-            # disc_loss = real_loss + fake_loss + (GAMMA / 2.0) * disc_reg
-            # disc_loss.backward()
-
-            fake_loss.backward()
+            d_loss = real_loss + fake_loss
+            d_loss.backward()
             sum_fake_loss += fake_loss.item()
             d_opt.step()
             "end"
-
-            "2. train g_net"
-            g_opt.zero_grad()
-            #
-            est_speech = g_net(g_input[:, :, :65].permute(0, 2, 1))
-            # fake_input = torch.cat((speech_low_pass_mag[:, :, 0:35], est_speech), 2)
-            fake_input = torch.cat((g_input[:, :, :65], est_speech), 2).permute(0, 2, 1).unsqueeze(3)
-            logits_fake = d_net(fake_input)
-            adversarial_loss = loss_helper.generator_loss_with_sigmoid(logits_fake)
-            # TODO cat(norm, log_spec)
-            # mse : 预测的语音更像归一化之后的
-            reconstruction_loss = loss_helper.LSD_loss(est_speech, g_label[:, :, 58:])
-            g_loss = adversarial_loss + lambda_for_rec_loss * reconstruction_loss
-            g_loss.backward()
-            g_opt.step()
-            "end"
-            sum_reconstruction_loss += (lambda_for_rec_loss * reconstruction_loss).item()
-            sum_adversarial_loss += adversarial_loss.item()
-            g_sum_loss += g_loss.item()
             if global_step % PRINT_TIME == 0 and global_step != 0:
-                writer.add_scalar('Generator/generator_loss', g_sum_loss / PRINT_TIME, global_step)
-                writer.add_scalar('Generator/reconstruction_loss', sum_reconstruction_loss / PRINT_TIME, global_step)
-                writer.add_scalar('Generator/adverarial_loss', sum_adversarial_loss / PRINT_TIME, global_step)
-                writer.add_scalar('Loss/real_loss', sum_real_loss / PRINT_TIME, global_step)
-                writer.add_scalar('Loss/fake_loss', sum_fake_loss / PRINT_TIME, global_step)
-                writer.add_scalar('Loss/disc_reg', sum_disc_reg / PRINT_TIME, global_step)
-                sum_reconstruction_loss = 0
-                sum_adversarial_loss = 0
+                writer.add_scalar('Generator/g_loss', g_sum_loss / PRINT_TIME, global_step)
+                writer.add_scalar('Discrimintor/real_loss', sum_real_loss / PRINT_TIME, global_step)
+                writer.add_scalar('Discrimintor/fake_loss', sum_fake_loss / PRINT_TIME, global_step)
                 g_sum_loss = 0
                 sum_fake_loss = 0
                 sum_real_loss = 0
-                sum_disc_reg = 0
             if global_step % SAVE_TIME == 0:
                 save_model(global_step, generator, g_opt, g_loss.item(), module_store + 'g_model_' + str(global_step) + '.pkl')
                 save_discriminator_model(global_step, discriminator, discriminator_opt, real_loss.item(), fake_loss.item(), module_store + 'd_model_' + str(global_step) + '.pkl')
@@ -339,9 +315,9 @@ if __name__ == "__main__":
     train_data_loader = SpeechDataLoader(data_set=train_cdnn_data_set,
                                          batch_size=TRAIN_BATCH_SIZE,
                                          is_shuffle=True)
-    pre_train_g_tag = True
+    pre_train_g_tag = False
     pre_train_d_tag = False
-    train_tag = False
+    train_tag = True
 
     # "pre train generator"
     if pre_train_g_tag:

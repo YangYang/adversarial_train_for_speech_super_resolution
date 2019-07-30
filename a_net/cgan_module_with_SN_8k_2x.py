@@ -34,7 +34,7 @@ class GeneratorNet(nn.Module):
         super(GeneratorNet, self).__init__()
         "encoder layers"
         # conv1
-        self.conv1 = nn.Conv1d(in_channels=65, out_channels=256, kernel_size=7, stride=2, padding=3)
+        self.conv1 = nn.Conv1d(in_channels=130, out_channels=256, kernel_size=7, stride=2, padding=3)
         self.bn1 = nn.BatchNorm1d(num_features=256)
         self.LeakyReLU1 = nn.LeakyReLU(negative_slope=0.2)
         # conv2
@@ -69,7 +69,8 @@ class GeneratorNet(nn.Module):
         "output layer"
         self.conv9 = nn.Conv1d(in_channels=71, out_channels=71, kernel_size=9, stride=1, padding=4)
 
-    def forward(self, x):
+    def forward(self, noise, labels):
+        x = torch.cat((noise, labels), 1)
         conv1_output = self.LeakyReLU1(self.bn1(self.conv1(x)))
         conv2_output = self.LeakyReLU2(self.bn2(self.conv2(conv1_output)))
         conv3_output = self.LeakyReLU3(self.bn3(self.conv3(conv2_output)))
@@ -114,7 +115,8 @@ class DiscriminatorNet(nn.Module):
         # self.Linear2 = nn.Linear(in_features=1024, out_features=1)
         self.Linear2 = SNLinear(in_features=1024, out_features=1)
 
-    def forward(self, x):
+    def forward(self, g_output, labels):
+        x = torch.cat((g_output, labels[:, :, :65]), 2).permute(0, 2, 1).unsqueeze(3)
         conv1_output = self.LeakyReLU1(self.conv1(x))
         conv2_output = self.LeakyReLU2(self.conv2(conv1_output))
         conv3_output = self.LeakyReLU3(self.conv3(conv2_output))
