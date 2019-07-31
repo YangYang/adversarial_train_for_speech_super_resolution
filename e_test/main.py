@@ -46,7 +46,22 @@ import librosa
 #     noise = np.random.random(sig.size) * 1e-3
 #     noise_list.append(noise)
 # np.save('noise_4_TIMIT_new.npy', np.array(noise_list))
+def cal_train_label_mean():
+    sig, sr = sf.read(TRAIN_LABEL_PATH)
+    stft = STFT(filter_length=FILTER_LENGTH, hop_length=HOP_LENGTH)
+    label_mag = stft.spec_transform(stft.transform(torch.Tensor(sig[np.newaxis, :]))).squeeze()
+    label_mag_mean = label_mag.log().mean(0)
+    label_mag_var = label_mag.log().var(0)
+    np.save(TRAIN_PARAM_PATH + 'train_label_log_mean.npy', label_mag_mean.detach().numpy())
+    np.save(TRAIN_PARAM_PATH + 'train_label_log_var.npy', label_mag_var.detach().numpy())
+    print(label_mag_mean.size())
+    print(label_mag_var.size())
+
 if __name__ == '__main__':
+    # cal_train_label_mean()
+    res = np.load(TRAIN_PARAM_PATH + 'train_log_mean.npy')
+    print(res.shape)
+    print(res)
     stft = STFT(filter_length=FILTER_LENGTH, hop_length=HOP_LENGTH)
     input, sr = sf.read('/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x/test_label/test_dr1_faks0_sa1.wav')
     clean, sr = sf.read('/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x/test_label/test_dr1_faks0_sa1.wav')

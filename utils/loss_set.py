@@ -144,7 +144,7 @@ class LossHelper(object):
         :return:
         """
         if is_full:
-            lsd = (label - est).pow(2).mean(2).sqrt().mean(1).mean(0)
+            lsd = (label - est).pow(2).mean(2).sqrt().mean(1).mean()
             # lsd = (torch.log(label + EPSILON) - torch.log(est + EPSILON)).pow(2).mean(2).sqrt().mean(1).mean(0)
         else:
             est_half = est[:, :, 58:]

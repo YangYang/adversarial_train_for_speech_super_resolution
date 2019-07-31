@@ -79,8 +79,8 @@ else:
 D_STEP = 10
 PRINT_TIME = 200
 SAVE_TIME = 2000
-NEED_NORM = False
-IS_LOG = False
+NEED_NORM = True
+IS_LOG = True
 
 # for this project
 # 2x : 65

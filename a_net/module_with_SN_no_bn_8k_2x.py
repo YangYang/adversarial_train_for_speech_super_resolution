@@ -70,22 +70,22 @@ class GeneratorNet(nn.Module):
         self.conv9 = nn.Conv1d(in_channels=71, out_channels=71, kernel_size=9, stride=1, padding=4)
 
     def forward(self, x):
-        conv1_output = self.LeakyReLU1(self.bn1(self.conv1(x)))
-        conv2_output = self.LeakyReLU2(self.bn2(self.conv2(conv1_output)))
-        conv3_output = self.LeakyReLU3(self.bn3(self.conv3(conv2_output)))
+        conv1_output = self.LeakyReLU1(self.conv1(x))
+        conv2_output = self.LeakyReLU2(self.conv2(conv1_output))
+        conv3_output = self.LeakyReLU3(self.conv3(conv2_output))
         # (1,1024,2)
         conv_bottleneck_output = self.LeakyReLU_bottleneck(self.bn_bottleneck(self.conv_bottleneck(conv3_output)))
-        conv5_output = self.LeakyReLU5(self.bn5(pixel_shuffle_1d(self.conv5(conv_bottleneck_output), 2)))
+        conv5_output = self.LeakyReLU5(pixel_shuffle_1d(self.conv5(conv_bottleneck_output), 2))
 
         # conv6
         stack1_output = torch.cat((conv5_output, conv3_output), 1)
-        conv6_output = self.LeakyReLU6(self.bn6(pixel_shuffle_1d(self.conv6(stack1_output), 2)))
+        conv6_output = self.LeakyReLU6(pixel_shuffle_1d(self.conv6(stack1_output), 2))
         # conv7
         stack2_output = torch.cat((conv6_output, conv2_output), 1)
-        conv7_output = self.LeakyReLU7(self.bn7(pixel_shuffle_1d(self.conv7(stack2_output), 2)))
+        conv7_output = self.LeakyReLU7(pixel_shuffle_1d(self.conv7(stack2_output), 2))
         # conv8
         stack3_output = torch.cat((conv7_output, conv1_output), 1)
-        conv8_output = self.LeakyReLU8(self.bn8(pixel_shuffle_1d(self.conv8(stack3_output), 2)))
+        conv8_output = self.LeakyReLU8(pixel_shuffle_1d(self.conv8(stack3_output), 2))
         # conv9
         conv9_output = self.conv9(conv8_output)
 

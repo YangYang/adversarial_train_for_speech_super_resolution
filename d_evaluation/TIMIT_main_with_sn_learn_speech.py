@@ -34,12 +34,10 @@ def validation_pesq(net, output_path):
     noise_list = np.load('noise_4_TIMIT_new.npy', allow_pickle=True)
     loss_helper = LossHelper()
     if NEED_NORM:
-        if IS_LOG:
-            train_mean = feature_creator.log_train_mean
-            train_var = feature_creator.log_train_var
-        else:
-            train_mean = feature_creator.train_mean
-            train_var = feature_creator.train_var
+        train_mean = feature_creator.train_mean
+        train_var = feature_creator.train_var
+        train_label_mean = feature_creator.train_label_mean
+        train_label_var = feature_creator.train_label_var
     for i in range(len(files)):
         if not files[i].endswith('_noise.wav') and files[i].endswith('.wav'):
             bar.update(i)
@@ -115,7 +113,7 @@ def validation_pesq(net, output_path):
             # 送入网络
             est_speech = net(input_list[:, :65, :])
             if NEED_NORM:
-                est_speech = est_speech * train_var[58:] + train_mean[58:]
+                est_speech = est_speech * train_label_var[58:] + train_label_mean[58:]
             if IS_LOG:
                 est_speech = torch.exp(est_speech)
             est_mag = torch.cat((base_list.permute(0, 2, 1)[:, :, :58], est_speech), 2)
@@ -924,7 +922,7 @@ if __name__ == '__main__':
     g_net = GeneratorNet()
     # res = resume_model(g_net, MODEL_STORE + 'IEEE_pre_train_g_learn_speech_with_noise_sigmoid_10/model_16000.pkl')
     # res = resume_model(g_net, MODEL_STORE + 'TIMIT_abs_train_learn_speech_with_sn_without_noise_sigmoid_10_mse_10_lr_1e-4/g_model_18000.pkl')
-    res = resume_model(g_net, MODEL_STORE + 'TIMIT_pre_train_learn_speech_with_sn_mse_mag/model_82000.pkl')
+    res = resume_model(g_net, MODEL_STORE + 'TIMIT_pre_train_learn_speech_with_sn_lsd/model_42000.pkl')
     # real_data_validation_d_net(d_net)
     # fake_data_validation_d_net(g_net, d_net)
     # seg_snr, half_lsd, full_lsd = cal_metrics(g_net)
@@ -940,7 +938,7 @@ if __name__ == '__main__':
     # print('res stoi : ' + str(res_stoi))
     # print('promote stoi : ' + str(promote_stoi))
     print('====================================')
-    output_path = '/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x/adversarial_train_4_SSR_mse_mag_82k/'
+    output_path = '/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x/adversarial_train_4_SSR_mse_lsd_no_bn_42k/'
     if os.path.exists(output_path):
         shutil.rmtree(output_path)
     os.mkdir(output_path)

@@ -6,6 +6,7 @@ from scipy.io import loadmat
 from utils.util import context_window
 from utils.stft_istft import STFT
 from utils.util import normalization
+import scipy.io as sio
 import soundfile as sf
 from config import *
 from torch.utils.data import DataLoader, Dataset
@@ -109,11 +110,15 @@ class FeatureCreator(nn.Module):
         self.label_helper = LabelHelper().cuda(CUDA_ID[0])
         if NEED_NORM:
             if IS_LOG:
-                self.log_train_mean = torch.Tensor(np.load(TRAIN_PARAM_PATH + 'train_log_mean.npy', allow_pickle=True)).cuda(CUDA_ID[0])
-                self.log_train_var = torch.Tensor(np.load(TRAIN_PARAM_PATH + 'train_log_var.npy', allow_pickle=True)).cuda(CUDA_ID[0])
+                self.train_mean = torch.Tensor(np.load(TRAIN_PARAM_PATH + 'train_log_mean.npy')).cuda(CUDA_ID[0])
+                self.train_var = torch.Tensor(np.load(TRAIN_PARAM_PATH + 'train_log_var.npy')).cuda(CUDA_ID[0])
+                self.train_label_mean = torch.Tensor(np.load(TRAIN_PARAM_PATH + 'train_label_log_mean.npy')).cuda(CUDA_ID[0])
+                self.train_label_var = torch.Tensor(np.load(TRAIN_PARAM_PATH + 'train_label_log_var.npy')).cuda(CUDA_ID[0])
             else:
-                self.train_mean = torch.Tensor(np.load(TRAIN_PARAM_PATH + 'train_mean.npy', allow_pickle=True)).cuda(CUDA_ID[0])
-                self.train_var = torch.Tensor(np.load(TRAIN_PARAM_PATH + 'train_var.npy', allow_pickle=True)).cuda(CUDA_ID[0])
+                self.train_mean = torch.Tensor(np.load(TRAIN_PARAM_PATH + 'train_mean.npy')).cuda(CUDA_ID[0])
+                self.train_var = torch.Tensor(np.load(TRAIN_PARAM_PATH + 'train_var.npy')).cuda(CUDA_ID[0])
+                self.train_label_mean = torch.Tensor(np.load(TRAIN_PARAM_PATH + 'train_label_mean.npy')).cuda(CUDA_ID[0])
+                self.train_label_var = torch.Tensor(np.load(TRAIN_PARAM_PATH + 'train_label_var.npy')).cuda(CUDA_ID[0])
 
     def forward(self, batch_info):
         # label 63
@@ -127,10 +132,12 @@ class FeatureCreator(nn.Module):
             g_label = torch.log(g_label + EPSILON)
         if NEED_NORM:
             if IS_LOG:
-                # normalized
-                g_input = (g_input - self.log_train_mean) / (self.log_train_var + torch.Tensor(np.array(EPSILON)).cuda(CUDA_ID[0]))
-            else:
-                # normalized
                 g_input = (g_input - self.train_mean) / (self.train_var + torch.Tensor(np.array(EPSILON)).cuda(CUDA_ID[0]))
+                g_label = (g_label - self.train_label_mean) / (self.train_label_var + torch.Tensor(np.array(EPSILON)).cuda(CUDA_ID[0]))
         # permute (N, C, L)
         return g_input, g_label
+
+    def revert_norm(self, est_speech, label):
+        est_speech_revert = est_speech * self.train_label_var[58:] + self.train_label_mean[58:]
+        label_revert = label * self.train_label_var + self.train_label_mean
+        return est_speech_revert, label_revert

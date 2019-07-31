@@ -14,6 +14,7 @@ from utils.model_handle import save_model, resume_model, save_discriminator_mode
 from utils.loss_set import LossHelper
 from utils.pesq import pesq
 import progressbar
+import scipy.io as sio
 from config import *
 from utils.util import get_alpha, normalization, re_normalization, discriminator_regularizer
 from utils.stft_istft import STFT
@@ -38,12 +39,10 @@ def validation_pesq(net, feature_creator):
     noise_list = np.load('noise_4_TIMIT_new.npy', allow_pickle=True)
     loss_helper = LossHelper()
     if NEED_NORM:
-        if IS_LOG:
-            train_mean = feature_creator.log_train_mean
-            train_var = feature_creator.log_train_var
-        else:
-            train_mean = feature_creator.train_mean
-            train_var = feature_creator.train_var
+        train_mean = feature_creator.train_mean
+        train_var = feature_creator.train_var
+        train_label_mean = feature_creator.train_label_mean
+        train_label_var = feature_creator.train_label_var
     for i in range(len(files)):
         if not files[i].endswith('_noise.wav') and files[i].endswith('.wav'):
             bar.update(i)
@@ -111,7 +110,7 @@ def validation_pesq(net, feature_creator):
             # 送入网络
             est_speech = net(input_list[:, :65, :])
             if NEED_NORM:
-                est_speech = est_speech * train_var[58:] + train_mean[58:]
+                est_speech = est_speech * train_label_var[58:] + train_label_mean[58:]
             if IS_LOG:
                 est_speech = torch.exp(est_speech)
             # 恢复语音
@@ -171,6 +170,7 @@ def validation_pesq(net, feature_creator):
     bar.finish()
     return base_pesq / VALIDATION_DATA_NUM, res_pesq / VALIDATION_DATA_NUM, promote_pesq / VALIDATION_DATA_NUM, sum_seg_snr / VALIDATION_DATA_NUM, sum_half_lsd / VALIDATION_DATA_NUM, sum_full_lsd / VALIDATION_DATA_NUM
 
+
 # 预训练生成器
 def pre_train_g(net, epoch, data_loader, loss_helper, optimizer):
     global pre_train_global_step
@@ -185,15 +185,18 @@ def pre_train_g(net, epoch, data_loader, loss_helper, optimizer):
     feature_creator = FeatureCreator()
     sum_loss = 0
     bar = progressbar.ProgressBar(0, train_cdnn_data_set.__len__() // TRAIN_BATCH_SIZE)
-    for i in range(epoch):
+    for i in range(50):
         bar.start()
         for batch_idx, batch_infos in enumerate(data_loader.get_data_loader()):
             bar.update(batch_idx)
-            # normalized LPS g_input; LPS g_label
+            # normalized LPS g_input; normalized LPS g_label
             g_input, g_label = feature_creator(batch_infos)
             optimizer.zero_grad()
             est_speech = net(g_input[:, :, :65].permute(0, 2, 1))
-            loss = loss_helper.LSD_loss(est_speech, g_label[:, :, 58:])
+            est_revert, g_label_revert = feature_creator.revert_norm(est_speech, g_label)
+            # 先用lsd训练50个epoch
+            # sio.savemat('tmp.mat', {'est': est_speech.detach().cpu().numpy(), 'label': g_label.detach().cpu().numpy()})
+            loss = loss_helper.LSD_loss(est_revert, g_label_revert[:, :, 58:])
             sum_loss += loss.item()
             loss.backward()
             optimizer.step()
@@ -226,7 +229,8 @@ def train(g_net, d_net, g_opt, d_opt, epoch, data_loader, loss_helper):
     log_store = LOG_STORE + path_dir
     module_store = MODEL_STORE + path_dir
     # LAMBDA_FOR_REC_LOSS
-    lambda_for_rec_loss = 10
+    lambda_for_rec_loss = 0.5
+    gramma = 2
     writer = SummaryWriter(log_store)
     feature_creator = FeatureCreator()
     bar = progressbar.ProgressBar(0, train_cdnn_data_set.__len__() // TRAIN_BATCH_SIZE)
@@ -245,7 +249,7 @@ def train(g_net, d_net, g_opt, d_opt, epoch, data_loader, loss_helper):
             g_input, g_label = feature_creator(batch_info)
             # noinspection PyUnresolvedReferences
             g_label = torch.autograd.Variable(g_label, requires_grad=True)
-            # fake_input = torch.autograd.Variable(fake_input, requires_grad=True)
+            g_input = torch.autograd.Variable(g_input, requires_grad=True)
 
             "1. train d_net"
             # 1.1 real
@@ -258,45 +262,45 @@ def train(g_net, d_net, g_opt, d_opt, epoch, data_loader, loss_helper):
             # output: B, 1
             logits_real = d_net(speech_real_input)
             real_loss = loss_helper.discriminator_loss_with_sigmoid(logits_real, is_fake=False)
-            real_loss.backward(retain_graph=True)
             sum_real_loss += real_loss.item()
 
 
             # 1.2 fake
             # B, F, T
             est_speech = g_net(g_input[:, :, :65].permute(0, 2, 1))
-            # fake_input = torch.cat((speech_low_pass_mag[:, :, 0:35], est_speech), 2)
-            # fake_input = torch.autograd.Variable(fake_input, requires_grad=True)
-            # input to d_net, fake_input shape is (B,F,T,1), especially F is K + N = 65 + 71 = 136
-            # TODO cat(norm, log_spec)
             fake_input = torch.cat((g_input[:, :, :65], est_speech), 2).permute(0, 2, 1).unsqueeze(3)
+            fake_input = torch.autograd.Variable(fake_input, requires_grad=True)
             logits_fake = d_net(fake_input)
             fake_loss = loss_helper.discriminator_loss_with_sigmoid(logits_fake, is_fake=True)
-            # disc_reg = discriminator_regularizer(logits_real, real_label, logits_fake, fake_input, d_net, d_opt)
-            # sum_disc_reg += disc_reg.item()
-            # disc_loss = real_loss + fake_loss + (GAMMA / 2.0) * disc_reg
-            # disc_loss.backward()
-
-            fake_loss.backward()
+            disc_reg = discriminator_regularizer(logits_real, g_label, logits_fake, fake_input, d_net, d_opt)
+            d_loss = real_loss + fake_loss - disc_reg * gramma / 2
+            d_loss.backward()
             sum_fake_loss += fake_loss.item()
             d_opt.step()
             "end"
 
             "2. train g_net"
             g_opt.zero_grad()
-            #
+            # generator data
             est_speech = g_net(g_input[:, :, :65].permute(0, 2, 1))
-            # fake_input = torch.cat((speech_low_pass_mag[:, :, 0:35], est_speech), 2)
             fake_input = torch.cat((g_input[:, :, :65], est_speech), 2).permute(0, 2, 1).unsqueeze(3)
-            logits_fake = d_net(fake_input)
+
+            # discriminator
+            logits_fake = d_net(fake_input.detach())
             adversarial_loss = loss_helper.generator_loss_with_sigmoid(logits_fake)
-            # TODO cat(norm, log_spec)
-            # mse : 预测的语音更像归一化之后的
-            reconstruction_loss = loss_helper.LSD_loss(est_speech, g_label[:, :, 58:])
+            if NEED_NORM:
+                est_4_loss, g_label_4_loss = feature_creator.revert_norm(est_speech, g_label)
+            else:
+                est_4_loss = est_speech
+                g_label_4_loss = g_label
+            reconstruction_loss = loss_helper.LSD_loss(est_4_loss, g_label_4_loss[:, :, 58:])
             g_loss = adversarial_loss + lambda_for_rec_loss * reconstruction_loss
             g_loss.backward()
             g_opt.step()
             "end"
+
+
+            sum_disc_reg += disc_reg.item()
             sum_reconstruction_loss += (lambda_for_rec_loss * reconstruction_loss).item()
             sum_adversarial_loss += adversarial_loss.item()
             g_sum_loss += g_loss.item()
@@ -339,24 +343,17 @@ if __name__ == "__main__":
     train_data_loader = SpeechDataLoader(data_set=train_cdnn_data_set,
                                          batch_size=TRAIN_BATCH_SIZE,
                                          is_shuffle=True)
-    pre_train_g_tag = True
+    pre_train_g_tag = False
     pre_train_d_tag = False
-    train_tag = False
+    train_tag = True
 
     # "pre train generator"
     if pre_train_g_tag:
         net = GeneratorNet()
-        # res = resume_model(net, MODEL_STORE + 'IEEE_pre_train_g_learn_speech_with_noise/model_666000.pkl')
+        # res = resume_model(net, MODEL_STORE + 'TIMIT_pre_train_learn_speech_with_sn_lsd/model_4000.pkl')
         net = net.cuda(CUDA_ID[0])
         train_loss_helper = LossHelper()
         train_optimizer = optim.Adam(net.parameters(), lr=1e-4)
-        # base_pesq, res_pesq, promote_pesq, seg_snr, half_lsd, full_lsd = validation_pesq(net)
-        # print('base pesq : ' + str(base_pesq))
-        # print('res pesq : ' + str(res_pesq))
-        # print('promote pesq : ' + str(promote_pesq))
-        # print('seg snr : ' + str(seg_snr))
-        # print('full lsd : ' + str(full_lsd))
-        # print('half lsd : ' + str(half_lsd))
         pre_train_g(net, EPOCH, train_data_loader, train_loss_helper, train_optimizer)
     # "pre train discrimintor"
     # if pre_train_d_tag:
@@ -376,8 +373,8 @@ if __name__ == "__main__":
         loss_helper = LossHelper()
         # 生成器
         generator = GeneratorNet()
-        # res = resume_model(generator, MODEL_STORE + 'IEEE_pre_train_g_learn_speech_with_noise_sigmoid_10/g_model_pre_train.pkl')
-        # generator.train()
+        res = resume_model(generator, MODEL_STORE + 'TIMIT_pre_train_learn_speech_with_sn_lsd/model_42000.pkl')
+        generator.train()
         generator = generator.train().cuda(CUDA_ID[0])
         # TODO LR
         generator_opt = optim.Adam(generator.parameters(), lr=LR)
