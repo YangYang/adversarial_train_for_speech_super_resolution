@@ -1,7 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <module type="PYTHON_MODULE" version="4">
   <component name="NewModuleRootManager">
-    <content url="file://$MODULE_DIR$" />
+    <content url="file://$MODULE_DIR$">
+      <excludeFolder url="file://$MODULE_DIR$/d_evaluation/adversarial_train_4_SSR_mse_lsd_60k" />
+      <excludeFolder url="file://$MODULE_DIR$/d_evaluation/cgan_16k" />
+      <excludeFolder url="file://$MODULE_DIR$/d_evaluation/cgan_20k" />
+      <excludeFolder url="file://$MODULE_DIR$/d_evaluation/cgan_30k" />
+      <excludeFolder url="file://$MODULE_DIR$/d_evaluation/cgan_36k" />
+      <excludeFolder url="file://$MODULE_DIR$/d_evaluation/tmp" />
+    </content>
     <orderEntry type="jdk" jdkName="Remote Python 3.7.3 (sftp://yangyang@192.168.123.155:22/home/yangyang/anaconda3/bin/python)" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
   </component>

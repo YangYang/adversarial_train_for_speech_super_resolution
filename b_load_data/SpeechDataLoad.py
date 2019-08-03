@@ -127,6 +127,8 @@ class FeatureCreator(nn.Module):
         # label mag
         speech_spec = self.stft.transform(batch_info.label.transpose(1, 0).cuda(CUDA_ID[0]))
         g_label = self.label_helper(speech_spec)
+        sio.savemat('data.mat', {'input': g_input.detach().cpu().numpy(),
+                                 'label': g_label.detach().cpu().numpy()})
         if IS_LOG:
             g_input = torch.log(g_input + EPSILON)
             g_label = torch.log(g_label + EPSILON)
@@ -138,6 +140,9 @@ class FeatureCreator(nn.Module):
         return g_input, g_label
 
     def revert_norm(self, est_speech, label):
-        est_speech_revert = est_speech * self.train_label_var[58:] + self.train_label_mean[58:]
+        if SAMPLING_RATE == 8000:
+            est_speech_revert = est_speech * self.train_label_var[58:] + self.train_label_mean[58:]
+        elif SAMPLING_RATE == 16000:
+            est_speech_revert = est_speech * self.train_label_var[116:] + self.train_label_mean[116:]
         label_revert = label * self.train_label_var + self.train_label_mean
         return est_speech_revert, label_revert

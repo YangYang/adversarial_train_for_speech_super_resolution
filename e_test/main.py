@@ -52,13 +52,25 @@ def cal_train_label_mean():
     label_mag = stft.spec_transform(stft.transform(torch.Tensor(sig[np.newaxis, :]))).squeeze()
     label_mag_mean = label_mag.log().mean(0)
     label_mag_var = label_mag.log().var(0)
-    np.save(TRAIN_PARAM_PATH + 'train_label_log_mean.npy', label_mag_mean.detach().numpy())
-    np.save(TRAIN_PARAM_PATH + 'train_label_log_var.npy', label_mag_var.detach().numpy())
+    np.save(TRAIN_PARAM_PATH + 'train_label_log_mean.npy', torch.log(label_mag + EPSILON).mean(0).detach().numpy())
+    np.save(TRAIN_PARAM_PATH + 'train_label_log_var.npy', torch.log(label_mag + EPSILON).var(0).detach().numpy())
+    np.save(TRAIN_PARAM_PATH + 'train_label_mean.npy', label_mag.mean(0).detach().numpy())
+    np.save(TRAIN_PARAM_PATH + 'train_label_var.npy', label_mag.var(0).detach().numpy())
     print(label_mag_mean.size())
     print(label_mag_var.size())
 
+def cal_train_mean():
+    sig, sr = sf.read(TRAIN_DATA_PATH)
+    stft = STFT(filter_length=FILTER_LENGTH, hop_length=HOP_LENGTH)
+    label_mag = stft.spec_transform(stft.transform(torch.Tensor(sig[np.newaxis, :]))).squeeze()
+    np.save(TRAIN_PARAM_PATH + 'train_mean.npy', label_mag.mean(0).detach().numpy())
+    np.save(TRAIN_PARAM_PATH + 'train_var.npy', label_mag.var(0).detach().numpy())
+    np.save(TRAIN_PARAM_PATH + 'train_log_mean.npy', torch.log(label_mag + EPSILON).mean(0).detach().numpy())
+    np.save(TRAIN_PARAM_PATH + 'train_log_var.npy', torch.log(label_mag + EPSILON).var(0).detach().numpy())
+
 if __name__ == '__main__':
-    # cal_train_label_mean()
+    cal_train_label_mean()
+    cal_train_mean()
     res = np.load(TRAIN_PARAM_PATH + 'train_log_mean.npy')
     print(res.shape)
     print(res)

@@ -11,7 +11,7 @@ from utils.pesq import pesq
 from scipy.io import loadmat, savemat
 from utils.loss_set import LossHelper
 from pystoi.stoi import stoi
-from a_net.module_with_SN_8k_2x import GeneratorNet, DiscriminatorNet
+from a_net.module_with_SN_16k_2x import GeneratorNet, DiscriminatorNet
 import shutil
 from tensorboardX import SummaryWriter
 
@@ -22,7 +22,7 @@ def validation_pesq(net, output_path):
     files = os.listdir(VALIDATION_DATA_PATH)
     files.sort()
     stft = STFT(filter_length=FILTER_LENGTH, hop_length=HOP_LENGTH)
-    bar = progressbar.ProgressBar(0, len(files))
+    bar = progressbar.ProgressBar(0, 100)
     bar.start()
     base_pesq = 0
     res_pesq = 0
@@ -38,143 +38,142 @@ def validation_pesq(net, output_path):
         train_var = feature_creator.train_var
         train_label_mean = feature_creator.train_label_mean
         train_label_var = feature_creator.train_label_var
-    for i in range(len(files)):
-        if not files[i].endswith('_noise.wav') and files[i].endswith('.wav'):
-            bar.update(i)
-            # input
-            speech, sr = sf.read(VALIDATION_DATA_PATH + files[i])
-            # 对齐
-            nframe = (len(speech) - FILTER_LENGTH) // HOP_LENGTH + 1
-            size = nframe % 32
-            nframe = nframe - size
-            sample_num = FILTER_LENGTH + (nframe - 1) * HOP_LENGTH
-            speech = speech[:sample_num]
-            sf.write(output_path + files[i], speech, sr)
-            # tmp 为半波整流之后获取相位用
-            base = speech.copy()
-            tmp = speech.copy()
-            tmp_low = speech.copy()
-            sf.write('base_cat.wav', base, sr)
-            base_mag = stft.spec_transform(stft.transform(torch.Tensor(base[np.newaxis, :]))).squeeze()
-            base_mag = base_mag.permute(1, 0)
-            # stft
-            speech = torch.Tensor(speech).unsqueeze(0)
-            speech_spec = stft.transform(speech)
-            speech_real = speech_spec[:, :, :, 0]
-            speech_imag = speech_spec[:, :, :, 1]
-            speech_mag = torch.sqrt(speech_real ** 2 + speech_imag ** 2).cuda(CUDA_ID[0])
-            speech_mag = speech_mag.permute(0, 2, 1).cuda(CUDA_ID[0])
-            # label，为了计算pesq
-            clean, sr = sf.read(VALIDATION_DATA_LABEL_PATH + files[i])
-            clean = clean[:sample_num]
-            # noise = noise_list[i][:sample_num]
-            # add noise for calculate real pesq
-            # clean += noise
-            # for calculate seg_snr
-            clean_frame = vec2frame(clean, 32, 8)
-            sf.write(output_path + files[i][:-4] + '_clean.wav', clean, sr)
-            sf.write('clean_cat.wav', clean, sr)
-            # 低频部分的语音，最后cat在一起用
-            # base, sr = sf.read(VALIDATION_DATA_PATH + files[i])
-            # sf.write(output_path + files[i][:-4] + '_base.wav', base, sr)
-            # base = base[:sample_num]
-            # base += noise
+    for i in range(100):
+        bar.update(i)
+        # input
+        speech, sr = sf.read(VALIDATION_DATA_PATH + files[i])
+        # 对齐
+        nframe = (len(speech) - FILTER_LENGTH) // HOP_LENGTH + 1
+        size = nframe % 32
+        nframe = nframe - size
+        sample_num = FILTER_LENGTH + (nframe - 1) * HOP_LENGTH
+        speech = speech[:sample_num]
+        sf.write(output_path + files[i], speech, sr)
+        # tmp 为半波整流之后获取相位用
+        base = speech.copy()
+        tmp = speech.copy()
+        tmp_low = speech.copy()
+        sf.write('base_cat.wav', base, sr)
+        base_mag = stft.spec_transform(stft.transform(torch.Tensor(base[np.newaxis, :]))).squeeze()
+        base_mag = base_mag.permute(1, 0)
+        # stft
+        speech = torch.Tensor(speech).unsqueeze(0)
+        speech_spec = stft.transform(speech)
+        speech_real = speech_spec[:, :, :, 0]
+        speech_imag = speech_spec[:, :, :, 1]
+        speech_mag = torch.sqrt(speech_real ** 2 + speech_imag ** 2).cuda(CUDA_ID[0])
+        speech_mag = speech_mag.permute(0, 2, 1).cuda(CUDA_ID[0])
+        # label，为了计算pesq
+        clean, sr = sf.read(VALIDATION_DATA_LABEL_PATH + files[i])
+        clean = clean[:sample_num]
+        # noise = noise_list[i][:sample_num]
+        # add noise for calculate real pesq
+        # clean += noise
+        # for calculate seg_snr
+        clean_frame = vec2frame(clean, 32, 8)
+        sf.write(output_path + files[i][:-4] + '_clean.wav', clean, sr)
+        sf.write('clean_cat.wav', clean, sr)
+        # 低频部分的语音，最后cat在一起用
+        # base, sr = sf.read(VALIDATION_DATA_PATH + files[i])
+        # sf.write(output_path + files[i][:-4] + '_base.wav', base, sr)
+        # base = base[:sample_num]
+        # base += noise
 
-            p1 = pesq('clean_cat.wav', 'base_cat.wav', is_current_file=True)
-            clean = torch.Tensor(clean).unsqueeze(0)
-            clean_spec = stft.transform(clean)
-            clean_real = clean_spec[:, :, :, 0]
-            clean_imag = clean_spec[:, :, :, 1]
-            clean_mag = torch.sqrt(clean_real ** 2 + clean_imag ** 2).cuda(CUDA_ID[0]).squeeze()
-            # 切片
-            speech_mag = speech_mag.squeeze()
-            # input_list = speech_mag.reshape(-1, speech_mag.size()[1] // 32, 32)
-            # base_list = base_mag.reshape(-1, speech_mag.size()[1] // 32, 32)
-            # clean_list = clean_mag.reshape(-1, speech_mag.size()[1] // 32, 32)
-            base_list = []
-            clean_list = []
-            input_list = []
-            for k in range(int(speech_mag.size()[1] / 32)):
-                k *= 32
-                item = speech_mag[:, k:k + 32].cpu().detach().numpy()
-                base_item = base_mag[:, k:k + 32].cpu().detach().numpy()
-                clean_item = clean_mag[k:k+32, :].cpu().detach().numpy()
-                base_list.append(base_item)
-                input_list.append(item)
-                clean_list.append(clean_item)
-            base_list = torch.Tensor(np.array(base_list)).cuda(CUDA_ID[0])
-            input_list = torch.Tensor(np.array(input_list)).cuda(CUDA_ID[0])
-            clean_list = torch.Tensor(np.array(clean_list)).cuda(CUDA_ID[0])
-            if IS_LOG:
-                input_list = torch.log(input_list + torch.Tensor(np.array(EPSILON)).cuda(CUDA_ID[0]))
-            # normalized
-            if NEED_NORM:
-                input_list = ((input_list.permute(0, 2, 1) - train_mean) / (train_var + torch.Tensor(np.array(EPSILON)).cuda(CUDA_ID[0]))).permute(0, 2, 1)
-            # 送入网络
-            est_speech = net(input_list[:, :65, :])
-            if NEED_NORM:
-                est_speech = est_speech * train_label_var[58:] + train_label_mean[58:]
-            if IS_LOG:
-                est_speech = torch.exp(est_speech)
-            est_mag = torch.cat((base_list.permute(0, 2, 1)[:, :, :58], est_speech), 2)
-            # savemat('tmp.mat', {'est': est_speech.reshape(-1, 71).detach().cpu().numpy(), 'clean_mag': clean_mag[:, 58:].log().detach().cpu().numpy()})
-            # savemat('tmp.mat', {'est_mag': est_mag.reshape(-1, 129).detach().cpu().numpy(), 'clean_mag': clean_mag.detach().cpu().numpy()})
-            # est_mag = torch.cat((base_list.permute(0, 2, 1)[:, :, :58], clean_list[:, :, 58:]), 2)
-            half_lsd = loss_helper.mertics_LSD(est_mag, clean_list, is_full=False)
-            full_lsd = loss_helper.mertics_LSD(est_mag, clean_list, is_full=True)
-            # 合并
-            est_mag = est_mag.reshape(-1, est_mag.shape[2]).unsqueeze(0)
-            "end"
+        p1 = pesq('clean_cat.wav', 'base_cat.wav', is_current_file=True)
+        clean = torch.Tensor(clean).unsqueeze(0)
+        clean_spec = stft.transform(clean)
+        clean_real = clean_spec[:, :, :, 0]
+        clean_imag = clean_spec[:, :, :, 1]
+        clean_mag = torch.sqrt(clean_real ** 2 + clean_imag ** 2).cuda(CUDA_ID[0]).squeeze()
+        # 切片
+        speech_mag = speech_mag.squeeze()
+        # input_list = speech_mag.reshape(-1, speech_mag.size()[1] // 32, 32)
+        # base_list = base_mag.reshape(-1, speech_mag.size()[1] // 32, 32)
+        # clean_list = clean_mag.reshape(-1, speech_mag.size()[1] // 32, 32)
+        base_list = []
+        clean_list = []
+        input_list = []
+        for k in range(int(speech_mag.size()[1] / 32)):
+            k *= 32
+            item = speech_mag[:, k:k + 32].cpu().detach().numpy()
+            base_item = base_mag[:, k:k + 32].cpu().detach().numpy()
+            clean_item = clean_mag[k:k+32, :].cpu().detach().numpy()
+            base_list.append(base_item)
+            input_list.append(item)
+            clean_list.append(clean_item)
+        base_list = torch.Tensor(np.array(base_list)).cuda(CUDA_ID[0])
+        input_list = torch.Tensor(np.array(input_list)).cuda(CUDA_ID[0])
+        clean_list = torch.Tensor(np.array(clean_list)).cuda(CUDA_ID[0])
+        if IS_LOG:
+            input_list = torch.log(input_list + torch.Tensor(np.array(EPSILON)).cuda(CUDA_ID[0]))
+        # normalized
+        if NEED_NORM:
+            input_list = ((input_list.permute(0, 2, 1) - train_mean) / (train_var + torch.Tensor(np.array(EPSILON)).cuda(CUDA_ID[0]))).permute(0, 2, 1)
+        # 送入网络
+        est_speech = net(input_list[:, :129, :])
+        if NEED_NORM:
+            est_speech = est_speech * train_label_var[116:] + train_label_mean[116:]
+        if IS_LOG:
+            est_speech = torch.exp(est_speech)
+        est_mag = torch.cat((base_list.permute(0, 2, 1)[:, :, :116], est_speech), 2)
+        # savemat('tmp.mat', {'est': est_speech.reshape(-1, 71).detach().cpu().numpy(), 'clean_mag': clean_mag[:, 116:].log().detach().cpu().numpy()})
+        # savemat('tmp.mat', {'est_mag': est_mag.reshape(-1, 129).detach().cpu().numpy(), 'clean_mag': clean_mag.detach().cpu().numpy()})
+        # est_mag = torch.cat((base_list.permute(0, 2, 1)[:, :, :116], clean_list[:, :, 116:]), 2)
+        half_lsd = loss_helper.mertics_LSD(est_mag, clean_list, is_full=False)
+        full_lsd = loss_helper.mertics_LSD(est_mag, clean_list, is_full=True)
+        # 合并
+        est_mag = est_mag.reshape(-1, est_mag.shape[2]).unsqueeze(0)
+        "end"
 
-            sum_full_lsd += full_lsd.item()
-            sum_half_lsd += half_lsd.item()
-            # 获取低频相位信息
-            tmp_low_spec = stft.transform(torch.Tensor(tmp_low[np.newaxis, :]))
-            tmp_low_real = tmp_low_spec[:, :, :, 0]
-            tmp_low_imag = tmp_low_spec[:, :, :, 1]
-            tmp_low_mag = torch.sqrt(tmp_low_real ** 2 + tmp_low_imag ** 2).squeeze()
-            "end"
+        sum_full_lsd += full_lsd.item()
+        sum_half_lsd += half_lsd.item()
+        # 获取低频相位信息
+        tmp_low_spec = stft.transform(torch.Tensor(tmp_low[np.newaxis, :]))
+        tmp_low_real = tmp_low_spec[:, :, :, 0]
+        tmp_low_imag = tmp_low_spec[:, :, :, 1]
+        tmp_low_mag = torch.sqrt(tmp_low_real ** 2 + tmp_low_imag ** 2).squeeze()
+        "end"
 
-            # 获取高频相位信息
-            tmp[tmp < 0] = 0
-            tmp = torch.Tensor(tmp).unsqueeze(0)
-            tmp_spec = stft.transform(tmp)
-            tmp_real = tmp_spec[:, :, :, 0]
-            tmp_imag = tmp_spec[:, :, :, 1]
-            tmp_mag = torch.sqrt(tmp_real ** 2 + tmp_imag ** 2)
-            # 低频使用原始相位，高频使用半波整流之后的语音的相位
-            tmp_mag = torch.cat((tmp_low_mag[:, :65], tmp_mag.squeeze()[:, 65:]), 1)
-            tmp_real = torch.cat((tmp_low_real.squeeze()[:, :65], tmp_real.squeeze()[:, 65:]), 1)
-            tmp_imag = torch.cat((tmp_low_imag.squeeze()[:, :65], tmp_imag.squeeze()[:, 65:]), 1)
-            # 纯净语音的相位
-            # tmp_mag = clean_mag.detach().cpu()
-            # tmp_real = clean_real.detach().cpu()
-            # tmp_imag = clean_imag.detach().cpu()
-            # TODO e_test
-            # test_real = e_test.detach().cpu() * tmp_real / tmp_mag
-            # test_imag = e_test.detach().cpu() * tmp_imag / tmp_mag
-            # test_res = torch.stack([test_real, test_imag], 3)
-            # test_res = stft.inverse(test_res)
-            # sf.write('e_test.wav', test_res.numpy().squeeze(), sr)
-            # 恢复语音
-            res_real = est_mag.detach().cpu() * tmp_real / tmp_mag
-            res_imag = est_mag.detach().cpu() * tmp_imag / tmp_mag
-            res_spec = torch.stack([res_real, res_imag], 3)
-            res = stft.inverse(res_spec)
-            sf.write(output_path + files[i][:-4] + '_res.wav', res.squeeze().detach().numpy(), sr)
-            # 加噪
-            # res += torch.Tensor(noise[: res.shape[1]])
-            sf.write('res_cat.wav', res.numpy().squeeze(), sr)
-            p2 = pesq('clean_cat.wav', 'res_cat.wav', is_current_file=True)
-            res_frame = vec2frame(res, 32, 8)
-            loss_helper = LossHelper()
-            seg_snr = loss_helper.seg_SNR_(torch.Tensor(res_frame), torch.Tensor(clean_frame))
+        # 获取高频相位信息
+        tmp[tmp < 0] = 0
+        tmp = torch.Tensor(tmp).unsqueeze(0)
+        tmp_spec = stft.transform(tmp)
+        tmp_real = tmp_spec[:, :, :, 0]
+        tmp_imag = tmp_spec[:, :, :, 1]
+        tmp_mag = torch.sqrt(tmp_real ** 2 + tmp_imag ** 2)
+        # 低频使用原始相位，高频使用半波整流之后的语音的相位
+        tmp_mag = torch.cat((tmp_low_mag[:, :129], tmp_mag.squeeze()[:, 129:]), 1)
+        tmp_real = torch.cat((tmp_low_real.squeeze()[:, :129], tmp_real.squeeze()[:, 129:]), 1)
+        tmp_imag = torch.cat((tmp_low_imag.squeeze()[:, :129], tmp_imag.squeeze()[:, 129:]), 1)
+        # 纯净语音的相位
+        # tmp_mag = clean_mag.detach().cpu()
+        # tmp_real = clean_real.detach().cpu()
+        # tmp_imag = clean_imag.detach().cpu()
+        # TODO e_test
+        # test_real = e_test.detach().cpu() * tmp_real / tmp_mag
+        # test_imag = e_test.detach().cpu() * tmp_imag / tmp_mag
+        # test_res = torch.stack([test_real, test_imag], 3)
+        # test_res = stft.inverse(test_res)
+        # sf.write('e_test.wav', test_res.numpy().squeeze(), sr)
+        # 恢复语音
+        res_real = est_mag.detach().cpu() * tmp_real / tmp_mag
+        res_imag = est_mag.detach().cpu() * tmp_imag / tmp_mag
+        res_spec = torch.stack([res_real, res_imag], 3)
+        res = stft.inverse(res_spec)
+        sf.write(output_path + files[i][:-4] + '_res.wav', res.squeeze().detach().numpy(), sr)
+        # 加噪
+        # res += torch.Tensor(noise[: res.shape[1]])
+        sf.write('res_cat.wav', res.numpy().squeeze(), sr)
+        p2 = pesq('clean_cat.wav', 'res_cat.wav', is_current_file=True)
+        res_frame = vec2frame(res, 32, 8)
+        loss_helper = LossHelper()
+        seg_snr = loss_helper.seg_SNR_(torch.Tensor(res_frame), torch.Tensor(clean_frame))
 
-            sum_seg_snr += seg_snr.item()
-            base_pesq += p1[0]
-            res_pesq += p2[0]
-            promote = p2[0] - p1[0]
-            promote_pesq += promote
+        sum_seg_snr += seg_snr.item()
+        base_pesq += p1[0]
+        res_pesq += p2[0]
+        promote = p2[0] - p1[0]
+        promote_pesq += promote
     bar.finish()
     return base_pesq / VALIDATION_DATA_NUM, res_pesq / VALIDATION_DATA_NUM, promote_pesq / VALIDATION_DATA_NUM, sum_seg_snr / VALIDATION_DATA_NUM, sum_half_lsd / VALIDATION_DATA_NUM, sum_full_lsd / VALIDATION_DATA_NUM
 
@@ -835,18 +834,18 @@ def cal_loss_4_test(net, output_path):
             if NEED_NORM:
                 input_list = ((input_list.permute(0, 2, 1) - train_mean) / (train_var + torch.Tensor(np.array(EPSILON)).cuda(CUDA_ID[0]))).permute(0, 2, 1)
             # 送入网络
-            est_speech = net(input_list[:, :65, :])
+            est_speech = net(input_list[:, :129, :])
             if NEED_NORM:
-                est_speech = est_speech * train_var[58:] + train_mean[58:]
+                est_speech = est_speech * train_var[116:] + train_mean[116:]
             if IS_LOG:
                 est_speech = torch.exp(est_speech)
-            # savemat(files[i][:-4] + '.mat', {'est': est_speech.reshape(-1, 71).detach().cpu().numpy(), 'clean_mag': clean_mag[:, 58:].detach().cpu().numpy()})
-            est_mag = torch.cat((base_list.permute(0, 2, 1)[:, :, :58], est_speech), 2)
+            # savemat(files[i][:-4] + '.mat', {'est': est_speech.reshape(-1, 71).detach().cpu().numpy(), 'clean_mag': clean_mag[:, 116:].detach().cpu().numpy()})
+            est_mag = torch.cat((base_list.permute(0, 2, 1)[:, :, :116], est_speech), 2)
             loss = loss_helper.MSE_loss(est_mag, clean_list)
             sum_loss += loss.item()
-            # savemat('tmp.mat', {'est': est_speech.reshape(-1, 71).detach().cpu().numpy(), 'clean_mag': clean_mag[:, 58:].log().detach().cpu().numpy()})
+            # savemat('tmp.mat', {'est': est_speech.reshape(-1, 71).detach().cpu().numpy(), 'clean_mag': clean_mag[:, 116:].log().detach().cpu().numpy()})
             # savemat('tmp.mat', {'est_mag': est_mag.reshape(-1, 129).detach().cpu().numpy(), 'clean_mag': clean_mag.detach().cpu().numpy()})
-            # est_mag = torch.cat((base_list.permute(0, 2, 1)[:, :, :58], clean_list[:, :, 58:]), 2)
+            # est_mag = torch.cat((base_list.permute(0, 2, 1)[:, :, :116], clean_list[:, :, 116:]), 2)
             # half_lsd = loss_helper.mertics_LSD(est_mag, clean_list, is_full=False)
             # full_lsd = loss_helper.mertics_LSD(est_mag, clean_list, is_full=True)
             # # 合并
@@ -870,9 +869,9 @@ def cal_loss_4_test(net, output_path):
             # tmp_imag = tmp_spec[:, :, :, 1]
             # tmp_mag = torch.sqrt(tmp_real ** 2 + tmp_imag ** 2)
             # # 低频使用原始相位，高频使用半波整流之后的语音的相位
-            # tmp_mag = torch.cat((tmp_low_mag[:, :65], tmp_mag.squeeze()[:, 65:]), 1)
-            # tmp_real = torch.cat((tmp_low_real.squeeze()[:, :65], tmp_real.squeeze()[:, 65:]), 1)
-            # tmp_imag = torch.cat((tmp_low_imag.squeeze()[:, :65], tmp_imag.squeeze()[:, 65:]), 1)
+            # tmp_mag = torch.cat((tmp_low_mag[:, :129], tmp_mag.squeeze()[:, 129:]), 1)
+            # tmp_real = torch.cat((tmp_low_real.squeeze()[:, :129], tmp_real.squeeze()[:, 129:]), 1)
+            # tmp_imag = torch.cat((tmp_low_imag.squeeze()[:, :129], tmp_imag.squeeze()[:, 129:]), 1)
             # # 纯净语音的相位
             # # tmp_mag = clean_mag.detach().cpu()
             # # tmp_real = clean_real.detach().cpu()
@@ -922,7 +921,7 @@ if __name__ == '__main__':
     g_net = GeneratorNet()
     # res = resume_model(g_net, MODEL_STORE + 'IEEE_pre_train_g_learn_speech_with_noise_sigmoid_10/model_16000.pkl')
     # res = resume_model(g_net, MODEL_STORE + 'TIMIT_abs_train_learn_speech_with_sn_without_noise_sigmoid_10_mse_10_lr_1e-4/g_model_18000.pkl')
-    res = resume_model(g_net, MODEL_STORE + 'TIMIT_train_learn_speech_with_sn_lsd/g_model_60000.pkl')
+    res = resume_model(g_net, MODEL_STORE + 'TIMIT_16k_train_learn_speech_with_sn_lsd_no_pre_train_d_in_norm/g_model_18000.pkl')
     # real_data_validation_d_net(d_net)
     # fake_data_validation_d_net(g_net, d_net)
     # seg_snr, half_lsd, full_lsd = cal_metrics(g_net)
@@ -938,7 +937,7 @@ if __name__ == '__main__':
     # print('res stoi : ' + str(res_stoi))
     # print('promote stoi : ' + str(promote_stoi))
     print('====================================')
-    output_path = '/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x/adversarial_train_4_SSR_mse_lsd_60k/'
+    output_path = '/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x/TIMIT_16k_train_learn_speech_with_sn_lsd_no_pre_train_d_in_norm_18k/'
     if os.path.exists(output_path):
         shutil.rmtree(output_path)
     os.mkdir(output_path)

@@ -69,7 +69,7 @@ def validation_pesq(net, feature_creator):
             clean += noise
             # for calculate seg_snr
             clean_frame = vec2frame(clean, 32, 8)
-            sf.write('clean_lsd.wav', clean, sr)
+            sf.write('clean.wav', clean, sr)
             # 低频部分的语音，最后cat在一起用
             base, sr = sf.read(VALIDATION_DATA_PATH + files[i])
             base = base[:sample_num]
@@ -77,10 +77,10 @@ def validation_pesq(net, feature_creator):
             tmp = base
             tmp_low = base.copy()
             base += noise
-            sf.write('base_lsd.wav', base, sr)
+            sf.write('base.wav', base, sr)
             base_mag = stft.spec_transform(stft.transform(torch.Tensor(base[np.newaxis, :]))).squeeze()
             base_mag = base_mag.permute(1, 0)
-            p1 = pesq('clean_lsd.wav', 'base_lsd.wav', is_current_file=True)
+            p1 = pesq('clean.wav', 'base.wav', is_current_file=True)
             clean = torch.Tensor(clean).unsqueeze(0)
             clean_spec = stft.transform(clean)
             clean_real = clean_spec[:, :, :, 0]
@@ -156,8 +156,8 @@ def validation_pesq(net, feature_creator):
             # sf.write(files[i][:-4] + '_res.wav', res.squeeze().detach().numpy(), sr)
             # 加噪
             res += torch.Tensor(noise[: res.shape[1]])
-            sf.write('res_lsd.wav', res.numpy().squeeze(), sr)
-            p2 = pesq('clean_lsd.wav', 'res_lsd.wav', is_current_file=True)
+            sf.write('res.wav', res.numpy().squeeze(), sr)
+            p2 = pesq('clean.wav', 'res.wav', is_current_file=True)
             res_frame = vec2frame(res, 32, 8)
             loss_helper = LossHelper()
             seg_snr = loss_helper.seg_SNR_(torch.Tensor(res_frame), torch.Tensor(clean_frame))
@@ -220,7 +220,7 @@ def pre_train_g(net, epoch, data_loader, loss_helper, optimizer):
 
 def train(g_net, d_net, g_opt, d_opt, epoch, data_loader, loss_helper):
     global global_step
-    path_dir = 'TIMIT_train_learn_speech_with_sn_lsd/'
+    path_dir = 'TIMIT_train_learn_speech_with_sn_lsd_has_pre_train/'
     # create log and module store
     if not os.path.exists(LOG_STORE + path_dir):
         os.mkdir(LOG_STORE + path_dir)
@@ -254,14 +254,14 @@ def train(g_net, d_net, g_opt, d_opt, epoch, data_loader, loss_helper):
             "1. train d_net"
             # 1.1 real
             d_opt.zero_grad()
-            if NEED_NORM:
-                g_input_speech = g_input * feature_creator.train_var + feature_creator.train_mean
-                g_label_speech = g_label * feature_creator.train_label_var + feature_creator.train_label_mean
-            else:
-                g_input_speech = g_input
-                g_label_speech = g_label
+            # if NEED_NORM:
+            #     g_input_speech = g_input * feature_creator.train_var + feature_creator.train_mean
+            #     g_label_speech = g_label * feature_creator.train_label_var + feature_creator.train_label_mean
+            # else:
+            #     g_input_speech = g_input
+            #     g_label_speech = g_label
             # d_net输入的是归一化后的g_input和g_label cat在一起的，即32 * (K + N)
-            speech_real_input = torch.cat((g_input_speech[:, :, :65], g_label_speech[:, :, 58:]), 2)
+            speech_real_input = torch.cat((g_input[:, :, :65], g_label[:, :, 58:]), 2)
             speech_real_input = speech_real_input.permute(0, 2, 1)
             speech_real_input = speech_real_input.unsqueeze(3)
             # input: B, F, T, 1
@@ -273,14 +273,14 @@ def train(g_net, d_net, g_opt, d_opt, epoch, data_loader, loss_helper):
 
             # 1.2 fake
             # B, F, T
-            g_fake_output = g_net(g_input[:, :, :65].permute(0, 2, 1))
-            if NEED_NORM:
-                g_input_speech = g_input * feature_creator.train_var + feature_creator.train_mean
-                g_fake_output_speech = g_fake_output * feature_creator.train_label_var[:71] + feature_creator.train_label_mean[:71]
-            else:
-                g_input_speech = g_input
-                g_fake_output_speech = g_fake_output
-            fake_input = torch.cat((g_input_speech[:, :, :65], g_fake_output_speech), 2).permute(0, 2, 1).unsqueeze(3)
+            est_speech = g_net(g_input[:, :, :65].permute(0, 2, 1))
+            # if NEED_NORM:
+            #     g_input_speech = g_input * feature_creator.train_var + feature_creator.train_mean
+            #     g_fake_output_speech = g_fake_output * feature_creator.train_label_var[:71] + feature_creator.train_label_mean[:71]
+            # else:
+            #     g_input_speech = g_input
+            #     g_fake_output_speech = g_fake_output
+            fake_input = torch.cat((g_input[:, :, :65], est_speech), 2).permute(0, 2, 1).unsqueeze(3)
             fake_input = torch.autograd.Variable(fake_input, requires_grad=True)
             logits_fake = d_net(fake_input)
             fake_loss = loss_helper.discriminator_loss_with_sigmoid(logits_fake, is_fake=True)
@@ -295,19 +295,23 @@ def train(g_net, d_net, g_opt, d_opt, epoch, data_loader, loss_helper):
             g_opt.zero_grad()
             # generator data
             g_est = g_net(g_input[:, :, :65].permute(0, 2, 1))
-            if NEED_NORM:
-                g_input_speech = g_input * feature_creator.train_var + feature_creator.train_mean
-                g_est_speech = g_est * feature_creator.train_label_var[:71] + feature_creator.train_label_mean[:71]
-            else:
-                g_input_speech = g_input
-                g_est_speech = g_est
-            fake_input = torch.cat((g_input_speech[:, :, :65], g_est_speech), 2).permute(0, 2, 1).unsqueeze(3)
+            # if NEED_NORM:
+            #     g_input_speech = g_input * feature_creator.train_var + feature_creator.train_mean
+            #     g_est_speech = g_est * feature_creator.train_label_var[:71] + feature_creator.train_label_mean[:71]
+            # else:
+            #     g_input_speech = g_input
+            #     g_est_speech = g_est
+            fake_input = torch.cat((g_input[:, :, :65], g_est), 2).permute(0, 2, 1).unsqueeze(3)
 
             # discriminator
             logits_fake = d_net(fake_input.detach())
             adversarial_loss = loss_helper.generator_loss_with_sigmoid(logits_fake)
-
-            reconstruction_loss = loss_helper.LSD_loss(g_est_speech, g_label_speech[:, :, 58:])
+            if NEED_NORM:
+                est_revert, g_label_revert = feature_creator.revert_norm(g_est, g_label)
+            else:
+                est_revert = est_speech
+                g_label_revert = g_label
+            reconstruction_loss = loss_helper.LSD_loss(est_revert, g_label_revert[:, :, 58:])
             g_loss = adversarial_loss + lambda_for_rec_loss * reconstruction_loss
             g_loss.backward()
             g_opt.step()
@@ -387,8 +391,8 @@ if __name__ == "__main__":
         loss_helper = LossHelper()
         # 生成器
         generator = GeneratorNet()
-        # res = resume_model(generator, MODEL_STORE + 'TIMIT_pre_train_learn_speech_with_sn_lsd/model_42000.pkl')
-        # generator.train()
+        res = resume_model(generator, MODEL_STORE + 'TIMIT_pre_train_learn_speech_with_sn_lsd/model_43000.pkl')
+        generator.train()
         generator = generator.train().cuda(CUDA_ID[0])
         # TODO LR
         generator_opt = optim.Adam(generator.parameters(), lr=LR)

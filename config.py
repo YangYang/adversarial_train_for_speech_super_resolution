@@ -9,21 +9,39 @@ PROJECT_NAME = os.path.split(cur_path)[1]
 # c_train
 EPOCH = 1000
 TRAIN_BATCH_SIZE = 64
-TRAIN_DATA_PATH = '/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x/tmp/train.wav'
-TRAIN_LABEL_PATH = '/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x/tmp/train_label.wav'
-TRAIN_PARAM_PATH = '/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x/tmp/'
-TRAIN_DATA_NUM = 4620
+SAMPLING_RATE = 16000
+if SAMPLING_RATE == 8000:
+    TRAIN_DATA_PATH = '/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x/tmp/train.wav'
+    TRAIN_LABEL_PATH = '/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x/tmp/train_label.wav'
+    TRAIN_PARAM_PATH = '/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x/tmp/'
+    TRAIN_DATA_NUM = 4620
 
-# validation
-VALIDATION_BATCH_SIZE = 1
-VALIDATION_DATA_PATH = '/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x/test/'
-VALIDATION_DATA_LABEL_PATH = '/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x/test_label/'
-VALIDATION_DATA_NUM = 100
+    # validation
+    VALIDATION_BATCH_SIZE = 1
+    VALIDATION_DATA_PATH = '/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x/test/'
+    VALIDATION_DATA_LABEL_PATH = '/home/yangyang/userspace/data/TIMIT_low_pass/8k_new_2x/test_label/'
+    VALIDATION_DATA_NUM = 100
 
-TEST_DATA_PATH = '/mnt/raid/data/public/SPEECH_ENHANCE_DATA_NEW/tt/mix/'
-TEST_DATA_PATH_NEW = '/home/yangyang/userspace/data/new/test_data.txt'
-TEST_DATA_PATH_NEW_SMALL = '/home/yangyang/userspace/data/new/test_data_small.txt'
-TEST_DATA_PATH_NEW_MINI = '/home/yangyang/userspace/data/new/test_data_mini.txt'
+    TEST_DATA_PATH = '/mnt/raid/data/public/SPEECH_ENHANCE_DATA_NEW/tt/mix/'
+    TEST_DATA_PATH_NEW = '/home/yangyang/userspace/data/new/test_data.txt'
+    TEST_DATA_PATH_NEW_SMALL = '/home/yangyang/userspace/data/new/test_data_small.txt'
+    TEST_DATA_PATH_NEW_MINI = '/home/yangyang/userspace/data/new/test_data_mini.txt'
+elif SAMPLING_RATE == 16000:
+    TRAIN_DATA_PATH = '/home/yangyang/userspace/data/TIMIT_low_pass/16k_2x/tmp/train.wav'
+    TRAIN_LABEL_PATH = '/home/yangyang/userspace/data/TIMIT_low_pass/16k_2x/tmp/train_label.wav'
+    TRAIN_PARAM_PATH = '/home/yangyang/userspace/data/TIMIT_low_pass/16k_2x/tmp/'
+    TRAIN_DATA_NUM = 4620
+
+    # validation
+    VALIDATION_BATCH_SIZE = 1
+    VALIDATION_DATA_PATH = '/home/yangyang/userspace/data/TIMIT_low_pass/16k_2x/test/'
+    VALIDATION_DATA_LABEL_PATH = '/home/yangyang/userspace/data/TIMIT_low_pass/16k_2x/test_label/'
+    VALIDATION_DATA_NUM = 100
+
+    TEST_DATA_PATH = '/mnt/raid/data/public/SPEECH_ENHANCE_DATA_NEW/tt/mix/'
+    TEST_DATA_PATH_NEW = '/home/yangyang/userspace/data/new/test_data.txt'
+    TEST_DATA_PATH_NEW_SMALL = '/home/yangyang/userspace/data/new/test_data_small.txt'
+    TEST_DATA_PATH_NEW_MINI = '/home/yangyang/userspace/data/new/test_data_mini.txt'
 TEST_DATA_NUM = 10000
 TEST_DATA_NUM_SMALL = 2000
 TEST_DATA_NUM_MINI = 1000
@@ -57,12 +75,11 @@ else:
     print('The validation result store path: {}'.format(RESULT_STORE))
 
 # tag
-CUDA_ID = ['cuda:1']
+CUDA_ID = ['cuda:2']
 PRE_TRAIN_D = False
 PRE_TRAIN_G = False
 TRAIN = True
 IS_REVERT = False   # d_net的输入是否revert
-SAMPLING_RATE = 8000
 WINDOWS_TIME = 32 * 1e-3   # 32 ms
 HOP_TIME = 8 * 1e-3        # 8ms
 # other parameters
